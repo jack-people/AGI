@@ -1,0 +1,328 @@
+============================================================
+  Batch Run Report
+  Total:   100
+  Passed:  87
+  Failed:  13
+  Rate:    87.0%
+============================================================
+
+By Category:
+  algebra: 15/20 (75%)
+  arithmetic: 22/25 (88%)
+  geometry: 17/20 (85%)
+  percent: 13/15 (87%)
+  word: 20/20 (100%)
+
+Failed Details:
+
+  [A08] 3 + 4 × 2 等于多少？
+    Check: 未匹配精确值 11.0，提取到的数值: []
+    A: calculator({'expression': '4 * 2'})
+    O: 8
+    A: calculator({'expression': '3 + 8'})
+    O: 11
+    A: calculator({'expression': '4 * 2'})
+    O: 8
+    A: calculator({'expression': '4 * 2'})
+    O: 8
+    A: calculator({'expression': '4 * 2'})
+    O: 8
+    A: calculator({'expression': '4 * 2'})
+    O: 8
+    A: calculator({'expression': '4 * 2'})
+    O: 8
+    A: calculator({'expression': '4 * 2'})
+    O: 8
+    A: calculator({'expression': '4 * 2'})
+    O: 8
+    A: calculator({'expression': '4 * 2'})
+    O: 8
+    Final: Agent stopped due to max iterations.
+
+  [A19] 24 × 25 等于多少？
+    Check: 未匹配精确值 600.0，提取到的数值: []
+    A: calculator({'expression': '4 * 25'})
+    O: 100
+    A: calculator({'expression': '4 * 25'})
+    O: 100
+    A: calculator({'expression': '4 * 25'})
+    O: 100
+    A: calculator({'expression': '4 * 25'})
+    O: 100
+    A: calculator({'expression': '4 * 25'})
+    O: 100
+    A: calculator({'expression': '4 * 25'})
+    O: 100
+    A: calculator({'expression': '4 * 25'})
+    O: 100
+    A: calculator({'expression': '4 * 25'})
+    O: 100
+    A: calculator({'expression': '4 * 25'})
+    O: 100
+    A: calculator({'expression': '4 * 25'})
+    O: 100
+    Final: Agent stopped due to max iterations.
+
+  [A21] 5 的 4 次方是多少？
+    Check: 未匹配精确值 625.0，提取到的数值: []
+    A: calculator({'expression': '5 * 5'})
+    O: 25
+    A: calculator({'expression': '5 * 5'})
+    O: 25
+    A: calculator({'expression': '5 * 5'})
+    O: 25
+    A: calculator({'expression': '5 * 5'})
+    O: 25
+    A: calculator({'expression': '5 * 5'})
+    O: 25
+    A: calculator({'expression': '5 * 5'})
+    O: 25
+    A: calculator({'expression': '5 * 5'})
+    O: 25
+    A: calculator({'expression': '5 * 5'})
+    O: 25
+    A: calculator({'expression': '5 * 5'})
+    O: 25
+    A: calculator({'expression': '5 * 5'})
+    O: 25
+    Final: Agent stopped due to max iterations.
+
+  [B01] 如果 3x + 7 = 22，x 等于多少？
+    Check: 未匹配精确值 5.0，提取到的数值: []
+    A: calculator({'expression': '22 - 7'})
+    O: 15
+    A: calculator({'expression': '22 - 7'})
+    O: 15
+    A: calculator({'expression': '22 - 7'})
+    O: 15
+    A: calculator({'expression': '22 - 7'})
+    O: 15
+    A: calculator({'expression': '22 - 7'})
+    O: 15
+    A: calculator({'expression': '22 - 7'})
+    O: 15
+    A: calculator({'expression': '22 - 7'})
+    O: 15
+    A: calculator({'expression': '22 - 7'})
+    O: 15
+    A: calculator({'expression': '22 - 7'})
+    O: 15
+    A: calculator({'expression': '22 - 7'})
+    O: 15
+    Final: Agent stopped due to max iterations.
+
+  [B04] 如果 4(x + 2) = 24，x 等于多少？
+    Check: 未匹配精确值 4.0，提取到的数值: []
+    A: calculator({'expression': '24 / 4'})
+    O: 6
+    A: calculator({'expression': '24 / 4'})
+    O: 6
+    A: calculator({'expression': '24 / 4'})
+    O: 6
+    A: calculator({'expression': '24 / 4'})
+    O: 6
+    A: calculator({'expression': '24 / 4'})
+    O: 6
+    A: calculator({'expression': '24 / 4'})
+    O: 6
+    A: calculator({'expression': '24 / 4'})
+    O: 6
+    A: calculator({'expression': '24 / 4'})
+    O: 6
+    A: calculator({'expression': '24 / 4'})
+    O: 6
+    A: calculator({'expression': '24 / 4'})
+    O: 6
+    Final: Agent stopped due to max iterations.
+
+  [B09] 如果 x/5 + 3 = 8，x 等于多少？
+    Check: 未匹配精确值 25.0，提取到的数值: []
+    A: calculator({'expression': '8 - 3'})
+    O: 5
+    A: calculator({'expression': '8 - 3'})
+    O: 5
+    A: calculator({'expression': '8 - 3'})
+    O: 5
+    A: calculator({'expression': '8 - 3'})
+    O: 5
+    A: calculator({'expression': '8 - 3'})
+    O: 5
+    A: calculator({'expression': '8 - 3'})
+    O: 5
+    A: calculator({'expression': '8 - 3'})
+    O: 5
+    A: calculator({'expression': '8 - 3'})
+    O: 5
+    A: calculator({'expression': '8 - 3'})
+    O: 5
+    A: calculator({'expression': '8 - 3'})
+    O: 5
+    Final: Agent stopped due to max iterations.
+
+  [B11] 如果 x + y = 10 且 x - y = 4，那么 x 和 y 分别是多少？
+    Check: 未匹配精确值 7.0，提取到的数值: []
+    A: calculator({'expression': '10 + 4'})
+    O: 14
+    A: calculator({'expression': '10 + 4'})
+    O: 14
+    A: calculator({'expression': '10 + 4'})
+    O: 14
+    A: calculator({'expression': '10 + 4'})
+    O: 14
+    A: calculator({'expression': '10 + 4'})
+    O: 14
+    A: calculator({'expression': '10 + 4'})
+    O: 14
+    A: calculator({'expression': '10 + 4'})
+    O: 14
+    A: calculator({'expression': '10 + 4'})
+    O: 14
+    A: calculator({'expression': '10 + 4'})
+    O: 14
+    A: calculator({'expression': '10 + 4'})
+    O: 14
+    Final: Agent stopped due to max iterations.
+
+  [B12] 如果 2x + y = 16 且 x = 5，y 等于多少？
+    Check: 未匹配精确值 6.0，提取到的数值: []
+    A: calculator({'expression': '2 * 5'})
+    O: 10
+    A: calculator({'expression': '2 * 5'})
+    O: 10
+    A: calculator({'expression': '2 * 5'})
+    O: 10
+    A: calculator({'expression': '2 * 5'})
+    O: 10
+    A: calculator({'expression': '2 * 5'})
+    O: 10
+    A: calculator({'expression': '2 * 5'})
+    O: 10
+    A: calculator({'expression': '2 * 5'})
+    O: 10
+    A: calculator({'expression': '2 * 5'})
+    O: 10
+    A: calculator({'expression': '2 * 5'})
+    O: 10
+    A: calculator({'expression': '2 * 5'})
+    O: 10
+    Final: Agent stopped due to max iterations.
+
+  [C10] 半径为 3、高为 5 的圆柱体体积大约是多少？（保留整数）
+    Check: 未匹配近似值 141.37，提取到的数值: [141.371669412, 141.0, 3.0, 5.0, 141.0]
+    A: calculator({'expression': '3 ** 2'})
+    O: 9
+    A: calculator({'expression': 'pi * 45'})
+    O: 141.371669412
+    Final: **第四步：保留整数**
+
+计算得到体积约为 **141.371669412**，保留整数为 **141**。
+
+---
+
+**最终答案：**
+
+半径为 3、高为 5 的圆柱体体积大约是 **141**（立方单位）。
+
+  [C15] 半径为 4 的球体体积大约是多少？（保留整数）
+    Check: 未匹配近似值 268.08，提取到的数值: [85.3333333333, 268.082573106, 268.082573106, 268.0, 4.0, 268.0]
+    A: calculator({'expression': '4 ** 3'})
+    O: 64
+    A: calculator({'expression': '4/3 * 64'})
+    O: 85.3333333333
+    A: calculator({'expression': '85.3333333333 * pi'})
+    O: 268.082573106
+    Final: **第三步：乘以 \\(\\pi\\)**  
+\\[
+V = 85.3333333333 \\times \\pi \\approx 268.082573106
+\\]
+
+**第四步：四舍五入保留整数**  
+\\[
+268.082573106 \\approx 268
+\\]
+
+---
+
+**最终答案：**  
+半径为 4 的球体体积大约是 **268**（立方单位）。
+
+  [C16] 边长为 6 的正六边形面积大约是多少？（保留整数）
+    Check: 未匹配近似值 93.53，提取到的数值: [6.0, 6.0, 2.0, 6.0, 2.0, 36.0, 3.0, 4.0, 2.0, 3.0, 3.0, 1.73205080757, 3.0, 36.0, 1.73205080757, 36.0, 62.3538290725, 4.0, 62.3538290725, 4.0, 15.588457268125, 6.0, 6.0, 15.588457268125, 93.53074360875, 93.53074360875, 94.0, 94.0]
+    A: calculator({'expression': '6 ** 2'})
+    O: 36
+    A: calculator({'expression': '6 ** 2'})
+    O: 36
+    A: calculator({'expression': 'sqrt(3)'})
+    O: 1.73205080757
+    A: calculator({'expression': '1.73205080757 * 36'})
+    O: 62.3538290725
+    Final: 好的，我们一步步来计算正六边形的面积。
+
+正六边形可以看作 6 个等边三角形拼成。边长为 \( a = 6 \)。
+
+**第一步：计算 \( a^2 \)**
+\[
+6^2 = 36
+\]
+
+**第二步：计算一个等边三角形的面积**
+
+等边三角形面积公式：
+\[
+S_{\triangle} = \frac{\sqrt{3}}{4} a^2
+\]
+
+先计算 \(\sqrt{3}\) 的近似值：
+\[
+
+  [D01] 200 的 15% 是多少？
+    Check: 未匹配精确值 30.0，提取到的数值: []
+    A: calculator({'expression': '15 / 100'})
+    O: 0.15
+    A: calculator({'expression': '15 / 100'})
+    O: 0.15
+    A: calculator({'expression': '15 / 100'})
+    O: 0.15
+    A: calculator({'expression': '15 / 100'})
+    O: 0.15
+    A: calculator({'expression': '15 / 100'})
+    O: 0.15
+    A: calculator({'expression': '15 / 100'})
+    O: 0.15
+    A: calculator({'expression': '15 / 100'})
+    O: 0.15
+    A: calculator({'expression': '15 / 100'})
+    O: 0.15
+    A: calculator({'expression': '15 / 100'})
+    O: 0.15
+    A: calculator({'expression': '15 / 100'})
+    O: 0.15
+    Final: Agent stopped due to max iterations.
+
+  [D07] 1/4 化成百分数是多少？
+    Check: 未匹配精确值 25.0，提取到的数值: []
+    A: calculator({'expression': '1 / 4'})
+    O: 0.25
+    A: calculator({'expression': '1 / 4'})
+    O: 0.25
+    A: calculator({'expression': '1 / 4'})
+    O: 0.25
+    A: calculator({'expression': '1 / 4'})
+    O: 0.25
+    A: calculator({'expression': '1 / 4'})
+    O: 0.25
+    A: calculator({'expression': '1 / 4'})
+    O: 0.25
+    A: calculator({'expression': '1 / 4'})
+    O: 0.25
+    A: calculator({'expression': '1 / 4'})
+    O: 0.25
+    A: calculator({'expression': '1 / 4'})
+    O: 0.25
+    A: calculator({'expression': '1 / 4'})
+    O: 0.25
+    Final: Agent stopped due to max iterations.
+
+Avg Time: 5306 ms
+Max: 16,670 ms
+Min: 1,228 ms

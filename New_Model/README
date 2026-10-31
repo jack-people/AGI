@@ -2,4 +2,24 @@
 
 要点：
     1、并行能力
-    2、模块化
+    2、模块化（从视觉开始）
+
+核心文档与论文：
+    - 想法记录：从“模仿”到“理解”（理清事物联系）、五感模块化、数据 -> 结构化数据、GRPO 策略
+    - Transformer架构：从经典 Transformer 到下一代并行模块化架构的演进分析
+    - 方案一：需求约束驱动的自验证系统（RCVS）与微积分局部线性近似理论
+    - 架构设计.md：PMV（Parallel Modular Vision-First Architecture）完整技术方案
+    - 训练方案与阶段计划.md：四阶段训练路线图（视觉对齐 -> SFT 模仿 -> GRPO+RCVS 理解内化 -> 真实主干扩展）与首版训练成果报告
+    - 相关研究综述.md：2023–2026 国际前沿相关工作调研与本架构创新点对比
+    - 论文_下一代并行模块化模型架构.md：中文完整投稿论文手稿（含数学建模、消融实验表、参考文献）
+    - paper_pmv_architecture.tex：IEEE/CVPR 双栏格式英文 LaTeX 论文手稿源码
+
+可运行原型、训练器与评测脚本（New_Model/prototype/）：
+    运行三阶段模型训练并生成模型权重成果（checkpoints/pmv_trained_weights.npz）：
+        python3 -m New_Model.prototype.trainer
+    运行端到端演示与对照实验：
+        python3 -m New_Model.prototype.demo
+    运行论文 120 题消融实验与并行扩展性基准：
+        python3 -m New_Model.prototype.benchmark
+    运行单元测试：
+        python3 -m unittest discover -s New_Model/prototype/tests -v

@@ -20,6 +20,7 @@ from New_Model.prototype.modules.vision import (
     VisualSceneBuilder,
 )
 from New_Model.prototype.protocol import QueryConstraint, VerificationStatus
+from New_Model.prototype.trainer import TrainablePMVWeights, run_full_training_pipeline
 
 
 class TestNextGenModelArchitecture(unittest.TestCase):
@@ -147,6 +148,22 @@ class TestNextGenModelArchitecture(unittest.TestCase):
         # 验证当各分支得分存在差异时，GRPO 组内相对优势均值为 0
         advantages = [c.grpo_advantage for c in candidates]
         self.assertAlmostEqual(float(np.mean(advantages)), 0.0, places=5)
+
+    def test_three_stage_training_pipeline_and_checkpoint(self) -> None:
+        """测试点 5：三阶段训练管线 (视觉对齐 -> SFT 模仿 -> GRPO+RCVS 理解) 收敛并生成权重成果。"""
+        report = run_full_training_pipeline()
+        prog = report["stage_progression"]
+
+        init_acc = prog["Stage0_Untrained_Init"]["overall_acc"]
+        sft_acc = prog["Stage2_SFT_Imitation"]["overall_acc"]
+        grpo_acc = prog["Stage3_GRPO_RCVS_Understanding"]["overall_acc"]
+
+        self.assertGreater(sft_acc, init_acc)
+        self.assertGreater(grpo_acc, sft_acc)
+        self.assertGreaterEqual(grpo_acc, 95.0)
+        self.assertEqual(
+            prog["Stage3_GRPO_RCVS_Understanding"]["false_accept_rate"], 0.0
+        )
 
 
 if __name__ == "__main__":

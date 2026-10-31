@@ -1,0 +1,191 @@
+{
+  "checkpoint_path": "New_Model/prototype/checkpoints/pmv_trained_weights.npz",
+  "training_time_sec": 0.745,
+  "stage_progression": {
+    "Stage0_Untrained_Init": {
+      "clean_acc": 27.5,
+      "occ_acc": 0.0,
+      "boundary_acc": 25.0,
+      "overall_acc": 17.5,
+      "false_accept_rate": 0.0
+    },
+    "Stage1_Vision_Alignment": {
+      "clean_acc": 32.5,
+      "occ_acc": 0.0,
+      "boundary_acc": 75.0,
+      "overall_acc": 35.83,
+      "false_accept_rate": 0.0
+    },
+    "Stage2_SFT_Imitation": {
+      "clean_acc": 95.0,
+      "occ_acc": 0.0,
+      "boundary_acc": 75.0,
+      "overall_acc": 56.67,
+      "false_accept_rate": 0.0
+    },
+    "Stage3_GRPO_RCVS_Understanding": {
+      "clean_acc": 95.0,
+      "occ_acc": 100.0,
+      "boundary_acc": 100.0,
+      "overall_acc": 98.33,
+      "false_accept_rate": 0.0
+    }
+  },
+  "learned_context_to_branch_routing_probs": {
+    "context_clean_high_margin": {
+      "strict_high_margin": 0.999,
+      "occlusion_compensated": 0.0003,
+      "transitive_relational": 0.0003,
+      "counterfactual_boundary": 0.0003
+    },
+    "context_occluded_noisy": {
+      "strict_high_margin": 0.0003,
+      "occlusion_compensated": 0.9991,
+      "transitive_relational": 0.0003,
+      "counterfactual_boundary": 0.0003
+    },
+    "context_moderate_margin": {
+      "strict_high_margin": 0.0015,
+      "occlusion_compensated": 0.0013,
+      "transitive_relational": 0.996,
+      "counterfactual_boundary": 0.0012
+    },
+    "context_unstable_boundary": {
+      "strict_high_margin": 0.0014,
+      "occlusion_compensated": 0.0013,
+      "transitive_relational": 0.0012,
+      "counterfactual_boundary": 0.9961
+    }
+  },
+  "training_curves": {
+    "stage1_vision_alignment": [
+      {
+        "epoch": 1.0,
+        "mse_loss": 0.015299
+      },
+      {
+        "epoch": 5.0,
+        "mse_loss": 0.00107
+      },
+      {
+        "epoch": 10.0,
+        "mse_loss": 0.00026
+      },
+      {
+        "epoch": 15.0,
+        "mse_loss": 0.000107
+      },
+      {
+        "epoch": 20.0,
+        "mse_loss": 6.1e-05
+      },
+      {
+        "epoch": 25.0,
+        "mse_loss": 4.5e-05
+      }
+    ],
+    "stage2_sft_imitation": [
+      {
+        "epoch": 1.0,
+        "ce_loss": 0.59338,
+        "clean_sft_acc": 92.5
+      },
+      {
+        "epoch": 5.0,
+        "ce_loss": 0.20962,
+        "clean_sft_acc": 100.0
+      },
+      {
+        "epoch": 10.0,
+        "ce_loss": 0.11066,
+        "clean_sft_acc": 100.0
+      },
+      {
+        "epoch": 15.0,
+        "ce_loss": 0.07518,
+        "clean_sft_acc": 100.0
+      },
+      {
+        "epoch": 20.0,
+        "ce_loss": 0.05713,
+        "clean_sft_acc": 100.0
+      },
+      {
+        "epoch": 25.0,
+        "ce_loss": 0.04619,
+        "clean_sft_acc": 100.0
+      },
+      {
+        "epoch": 30.0,
+        "ce_loss": 0.03884,
+        "clean_sft_acc": 100.0
+      }
+    ],
+    "stage3_grpo_self_verified": [
+      {
+        "epoch": 1.0,
+        "mean_expected_reward": 0.6889,
+        "overall_acc": 98.33,
+        "occ_acc": 100.0,
+        "boundary_acc": 100.0,
+        "false_accept_rate": 0.0
+      },
+      {
+        "epoch": 5.0,
+        "mean_expected_reward": 0.937,
+        "overall_acc": 98.33,
+        "occ_acc": 100.0,
+        "boundary_acc": 100.0,
+        "false_accept_rate": 0.0
+      },
+      {
+        "epoch": 10.0,
+        "mean_expected_reward": 0.9275,
+        "overall_acc": 98.33,
+        "occ_acc": 100.0,
+        "boundary_acc": 100.0,
+        "false_accept_rate": 0.0
+      },
+      {
+        "epoch": 15.0,
+        "mean_expected_reward": 0.9294,
+        "overall_acc": 98.33,
+        "occ_acc": 100.0,
+        "boundary_acc": 100.0,
+        "false_accept_rate": 0.0
+      },
+      {
+        "epoch": 20.0,
+        "mean_expected_reward": 0.9471,
+        "overall_acc": 98.33,
+        "occ_acc": 100.0,
+        "boundary_acc": 100.0,
+        "false_accept_rate": 0.0
+      },
+      {
+        "epoch": 25.0,
+        "mean_expected_reward": 0.9476,
+        "overall_acc": 98.33,
+        "occ_acc": 100.0,
+        "boundary_acc": 100.0,
+        "false_accept_rate": 0.0
+      },
+      {
+        "epoch": 30.0,
+        "mean_expected_reward": 0.9395,
+        "overall_acc": 98.33,
+        "occ_acc": 100.0,
+        "boundary_acc": 100.0,
+        "false_accept_rate": 0.0
+      },
+      {
+        "epoch": 35.0,
+        "mean_expected_reward": 0.9397,
+        "overall_acc": 98.33,
+        "occ_acc": 100.0,
+        "boundary_acc": 100.0,
+        "false_accept_rate": 0.0
+      }
+    ]
+  }
+}

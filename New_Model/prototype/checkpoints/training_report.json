@@ -1,6 +1,6 @@
 {
   "checkpoint_path": "New_Model/prototype/checkpoints/pmv_trained_weights.npz",
-  "training_time_sec": 0.745,
+  "training_time_sec": 0.728,
   "stage_progression": {
     "Stage0_Untrained_Init": {
       "clean_acc": 27.5,

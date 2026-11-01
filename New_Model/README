@@ -14,12 +14,21 @@
     - 论文_下一代并行模块化模型架构.md：中文完整投稿论文手稿（含数学建模、消融实验表、参考文献）
     - paper_pmv_architecture.tex：IEEE/CVPR 双栏格式英文 LaTeX 论文手稿源码
 
-可运行原型、训练器与评测脚本（New_Model/prototype/）：
-    运行三阶段模型训练并生成模型权重成果（checkpoints/pmv_trained_weights.npz）：
+原始训练数据与模型权重目录：
+    - New_Model/prototype/data/raw_images_120x64x64x3.npy：120 张原始 64x64x3 RGB 视觉训练图像张量
+    - New_Model/prototype/data/dataset_manifest.jsonl：120 条训练样本的完整结构化查询与真值标注清单
+    - New_Model/prototype/data/sample_images/：导出的可视化 PPM 原图样本
+    - New_Model/prototype/checkpoints/pmv_trained_weights.npz：三阶段训练产出的模型权重文件
+    - New_Model/prototype/checkpoints/training_report.json：完整训练日志与指标曲线
+
+可运行原型、训练器与独立验证脚本（New_Model/prototype/）：
+    1. 运行三阶段模型训练并生成模型权重成果：
         python3 -m New_Model.prototype.trainer
-    运行端到端演示与对照实验：
+    2. 导出原始训练数据并在未见过的新测试集 (Unseen Holdout Set) 上独立验证模型权重：
+        python3 -m New_Model.prototype.evaluate_checkpoint
+    3. 运行端到端演示与对照实验：
         python3 -m New_Model.prototype.demo
-    运行论文 120 题消融实验与并行扩展性基准：
+    4. 运行论文 120 题消融实验与并行扩展性基准：
         python3 -m New_Model.prototype.benchmark
-    运行单元测试：
+    5. 运行单元测试：
         python3 -m unittest discover -s New_Model/prototype/tests -v

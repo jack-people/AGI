@@ -34,7 +34,13 @@ from urllib.parse import parse_qs, urlparse
 import numpy as np
 
 from .evaluate_checkpoint import CKPT_PATH, infer_with_weights
-from .modules.vision import SceneObjectSpec, VisionModuleV2, VisualSceneBuilder
+from .modules.vision import (
+    COLOR_LABELS,
+    SHAPE_LABELS,
+    SceneObjectSpec,
+    VisionModuleV2,
+    VisualSceneBuilder,
+)
 from .protocol import QueryConstraint
 from .trainer import TrainablePMVWeights
 
@@ -103,17 +109,8 @@ def build_presets() -> Dict[str, Dict[str, Any]]:
     }
 
 
-COLOR_ZH = {
-    "red": "红色",
-    "green": "绿色",
-    "blue": "蓝色",
-    "yellow": "黄色",
-}
-SHAPE_ZH = {
-    "rectangle": "矩形",
-    "circle": "圆形",
-    "triangle": "三角形",
-}
+COLOR_ZH = COLOR_LABELS
+SHAPE_ZH = SHAPE_LABELS
 RELATION_ZH = {
     "left_of": "在",
     "above": "在",
@@ -200,8 +197,8 @@ class InferenceApp:
             relations.append({**edge.to_dict(), "sentence": sentence})
         if not entities:
             summary = (
-                "没有识别到红、绿、蓝、黄的色块。"
-                "当前视觉模块只识别这四种颜色，以及矩形、圆形、三角形。"
+                "没有识别到色块。当前视觉模块识别红、橙、黄、绿、青、蓝、紫、粉、白、灰、棕、黑，"
+                "以及矩形、圆形、三角形、菱形。物体需要和画面边缘的背景颜色明显不同。"
             )
         else:
             names = "、".join(item["label"] for item in entities)
@@ -287,7 +284,7 @@ PAGE = """<!DOCTYPE html>
 </head>
 <body>
   <h1>图片识别</h1>
-  <p>选择一张图片，视觉模块会标出它能识别的色块、形状和空间关系。当前只识别红、绿、蓝、黄，以及矩形、圆形、三角形。</p>
+  <p>选择一张图片。当前能识别的颜色：红、橙、黄、绿、青、蓝、紫、粉、白、灰、棕、黑。形状：矩形、圆形、三角形、菱形。同一种颜色如果分成两块，会分别框出来。</p>
   <p>
     <input id="file" type="file" accept="image/*">
     <button id="example" type="button">用内置示例图</button>
@@ -303,7 +300,11 @@ PAGE = """<!DOCTYPE html>
     const summary = document.getElementById("summary");
     const entityList = document.getElementById("entities");
     const relationList = document.getElementById("relations");
-    const colors = { red: "#d22", green: "#2a2", blue: "#24a", yellow: "#ca0" };
+    const colors = {
+      red: "#d22", orange: "#e80", yellow: "#ca0", green: "#2a2",
+      cyan: "#1aa", blue: "#24a", purple: "#72b", pink: "#e59",
+      white: "#ddd", gray: "#888", brown: "#852", black: "#111"
+    };
 
     function drawResult(image, result) {
       const scale = Math.min(480 / image.width, 480 / image.height, 4);

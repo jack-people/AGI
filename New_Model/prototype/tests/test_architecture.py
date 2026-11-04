@@ -149,6 +149,35 @@ class TestNextGenModelArchitecture(unittest.TestCase):
         advantages = [c.grpo_advantage for c in candidates]
         self.assertAlmostEqual(float(np.mean(advantages)), 0.0, places=5)
 
+    def test_expanded_colors_shapes_and_separate_instances(self) -> None:
+        """同色分开的物体各自成目标，并识别新增的橙色、紫色和菱形。"""
+        img = self.builder.render(
+            [
+                SceneObjectSpec("orange_ball", "orange", "circle", 0.08, 0.08, 0.38, 0.34),
+                SceneObjectSpec("purple_diamond", "purple", "diamond", 0.08, 0.62, 0.40, 0.92),
+                SceneObjectSpec("cyan_tri", "cyan", "triangle", 0.40, 0.32, 0.62, 0.58),
+                SceneObjectSpec("pink_box", "pink", "rectangle", 0.66, 0.36, 0.90, 0.56),
+                SceneObjectSpec("red_left", "red", "rectangle", 0.55, 0.06, 0.88, 0.28),
+                SceneObjectSpec("red_right", "red", "rectangle", 0.55, 0.62, 0.88, 0.90),
+            ]
+        )
+        sg = VisionModuleV2(embedding_dim=16).encode_to_scene_graph(img)
+        colors = [node.attributes["color"] for node in sg.nodes]
+        self.assertEqual(colors.count("red"), 2)
+        self.assertIn("orange", colors)
+        purple = [node for node in sg.nodes if node.attributes["color"] == "purple"]
+        self.assertEqual(len(purple), 1)
+        self.assertEqual(purple[0].attributes["shape"], "diamond")
+        orange = [node for node in sg.nodes if node.attributes["color"] == "orange"]
+        self.assertEqual(len(orange), 1)
+        self.assertEqual(orange[0].attributes["shape"], "circle")
+        cyan = [node for node in sg.nodes if node.attributes["color"] == "cyan"]
+        self.assertEqual(len(cyan), 1)
+        self.assertEqual(cyan[0].attributes["shape"], "triangle")
+        pink = [node for node in sg.nodes if node.attributes["color"] == "pink"]
+        self.assertEqual(len(pink), 1)
+        self.assertEqual(pink[0].attributes["shape"], "rectangle")
+
     def test_three_stage_training_pipeline_and_checkpoint(self) -> None:
         """测试点 5：三阶段训练管线 (视觉对齐 -> SFT 模仿 -> GRPO+RCVS 理解) 收敛并生成权重成果。"""
         report = run_full_training_pipeline()

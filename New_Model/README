@@ -30,7 +30,7 @@
         python3 -m New_Model.prototype.serve --self-check
     4. 启动本地推理服务（默认 http://127.0.0.1:8765 ，Ctrl+C 停止）：
         python3 -m New_Model.prototype.serve --host 0.0.0.0 --port 8765
-    5. 浏览器打开 http://127.0.0.1:8765/ ，选择一张图片进行识别。页面会标出红、绿、蓝、黄色块及其矩形、圆形、三角形和空间关系。也可直接访问：
+    5. 浏览器打开 http://127.0.0.1:8765/ ，选择一张图片进行识别。页面会标出红、橙、黄、绿、青、蓝、紫、粉、白、灰、棕、黑色块，以及矩形、圆形、三角形、菱形和空间关系。同一种颜色分成两块时会分别框出。也可直接访问：
         http://127.0.0.1:8765/predict?preset=clean
         http://127.0.0.1:8765/predict?preset=occluded
         http://127.0.0.1:8765/predict?preset=unstable

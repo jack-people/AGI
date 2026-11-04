@@ -2,4 +2,48 @@
 
 要点：
     1、并行能力
-    2、模块化
+    2、模块化（从视觉开始）
+
+核心文档与论文：
+    - 想法记录：从“模仿”到“理解”（理清事物联系）、五感模块化、数据 -> 结构化数据、GRPO 策略
+    - Transformer架构：从经典 Transformer 到下一代并行模块化架构的演进分析
+    - 方案一：需求约束驱动的自验证系统（RCVS）与微积分局部线性近似理论
+    - 架构设计.md：PMV（Parallel Modular Vision-First Architecture）完整技术方案
+    - 训练方案与阶段计划.md：四阶段训练路线图（视觉对齐 -> SFT 模仿 -> GRPO+RCVS 理解内化 -> 真实主干扩展）与首版训练成果报告
+    - 相关研究综述.md：2023–2026 国际前沿相关工作调研与本架构创新点对比
+    - 论文_下一代并行模块化模型架构.md：中文完整投稿论文手稿（含数学建模、消融实验表、参考文献）
+    - paper_pmv_architecture.tex：IEEE/CVPR 双栏格式英文 LaTeX 论文手稿源码
+
+原始训练数据与模型权重目录：
+    - New_Model/prototype/data/raw_images_120x64x64x3.npy：120 张原始 64x64x3 RGB 视觉训练图像张量
+    - New_Model/prototype/data/dataset_manifest.jsonl：120 条训练样本的完整结构化查询与真值标注清单
+    - New_Model/prototype/data/sample_images/：导出的可视化 PPM 原图样本
+    - New_Model/prototype/checkpoints/pmv_trained_weights.npz：三阶段训练产出的模型权重文件
+    - New_Model/prototype/checkpoints/training_report.json：完整训练日志与指标曲线
+
+部署与测试（在仓库根目录，只需 Python 3 和 numpy）：
+    1. 确认依赖：
+        python3 -c "import numpy; print(numpy.__version__)"
+    2. 单元测试：
+        python3 -m unittest discover -s New_Model/prototype/tests -v
+    3. 不启动服务，直接对三条预设场景做推理冒烟：
+        python3 -m New_Model.prototype.serve --self-check
+    4. 启动本地推理服务（默认 http://127.0.0.1:8765 ，Ctrl+C 停止）：
+        python3 -m New_Model.prototype.serve --host 0.0.0.0 --port 8765
+    5. 浏览器打开 http://127.0.0.1:8765/ ，选择一张图片进行识别。页面会标出红、橙、黄、绿、青、蓝、紫、粉、白、灰、棕、黑色块，以及矩形、圆形、三角形、菱形和空间关系。同一种颜色分成两块时会分别框出。也可直接访问：
+        http://127.0.0.1:8765/predict?preset=clean
+        http://127.0.0.1:8765/predict?preset=occluded
+        http://127.0.0.1:8765/predict?preset=unstable
+       预期：clean 与 occluded 的 accepted 为 true，unstable 的 accepted 为 false。
+       PowerShell 里 curl 是 Invoke-WebRequest 的别名，命令行请用 curl.exe，或：
+        Invoke-RestMethod http://127.0.0.1:8765/predict?preset=clean
+
+其他脚本：
+    1. 三阶段训练并写出权重：
+        python3 -m New_Model.prototype.trainer
+    2. 导出原始数据，并在未见测试集上对比训练前后权重：
+        python3 -m New_Model.prototype.evaluate_checkpoint
+    3. 端到端演示：
+        python3 -m New_Model.prototype.demo
+    4. 120 题消融与并行加速：
+        python3 -m New_Model.prototype.benchmark

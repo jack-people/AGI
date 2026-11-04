@@ -280,6 +280,127 @@ def generate_unseen_holdout_test_suite(seed_offset: int = 9000) -> List[Dict[str
     return holdout
 
 
+def infer_with_weights(
+    weights: TrainablePMVWeights,
+    image: np.ndarray,
+    query: QueryConstraint,
+    vision: VisionModuleV2 | None = None,
+) -> Dict[str, Any]:
+    """用已加载权重对一张图和一个结构化查询做一次推理，返回可序列化结果。"""
+    if vision is None:
+        vision = VisionModuleV2(embedding_dim=weights.embedding_dim)
+    sg = vision.encode_to_scene_graph(image)
+    if not sg.nodes:
+        return {
+            "accepted": False,
+            "status": "UNKNOWN",
+            "reason": "视觉模块没有提取到实体",
+            "nodes": [],
+            "selected_entity_id": None,
+            "selected_color": None,
+            "chosen_branch": None,
+            "branch_probs": {},
+            "goal": query.goal,
+        }
+
+    q_vec = encode_query_vector(query, sg, weights.embedding_dim)
+    ctx_feat = extract_scene_context_features(sg, query)
+
+    raw_embs = np.stack([n.embedding for n in sg.nodes], axis=0)
+    proj_embs = raw_embs @ weights.w_vis_proj + weights.b_vis_proj
+    q_mat = proj_embs @ weights.w_q
+    k_mat = proj_embs @ weights.w_k
+    v_mat = proj_embs @ weights.w_v
+    attn = softmax((q_mat @ k_mat.T) / math.sqrt(weights.embedding_dim))
+    ctx_embs = proj_embs + attn @ v_mat
+    node_probs = softmax(ctx_embs @ (q_vec @ weights.w_match))
+
+    branch_probs = softmax(ctx_feat @ weights.policy_logits)
+    chosen_branch = int(np.argmax(branch_probs))
+
+    ranked_indices = np.argsort(-node_probs)
+    chosen_idx = int(ranked_indices[0])
+    if chosen_branch == 1:
+        for idx in ranked_indices:
+            cand_node = sg.nodes[int(idx)]
+            if cand_node.attributes.get("occluded", False) and all(
+                cand_node.attributes.get(k) == v
+                for k, v in query.target_attributes.items()
+            ):
+                chosen_idx = int(idx)
+                break
+
+    node = sg.nodes[chosen_idx]
+    attr_matched = all(
+        node.attributes.get(k) == v for k, v in query.target_attributes.items()
+    )
+    min_margin = 0.0
+    rel_matched = False
+    if query.required_relations:
+        rel_type, ref_filter = query.required_relations[0]
+        for edge in sg.find_edges(source_id=node.entity_id, relation_type=rel_type):
+            target_node = sg.get_node(edge.target_id)
+            if target_node and all(
+                target_node.attributes.get(k) == v for k, v in ref_filter.items()
+            ):
+                rel_matched = True
+                min_margin = max(min_margin, edge.margin)
+
+    radius = query.perturbation_radius
+    local_err_bound = 1.4142 * radius + (radius ** 2)
+    is_occluded = bool(node.attributes.get("occluded", False))
+
+    if chosen_branch == 0:
+        pred_accept = (
+            attr_matched
+            and (not is_occluded)
+            and rel_matched
+            and min_margin >= 0.055
+            and min_margin > local_err_bound
+        )
+    elif chosen_branch == 1:
+        pred_accept = (
+            attr_matched
+            and is_occluded
+            and rel_matched
+            and min_margin > local_err_bound
+        )
+    elif chosen_branch == 2:
+        pred_accept = (
+            attr_matched
+            and (not is_occluded)
+            and rel_matched
+            and (min_margin > local_err_bound)
+            and (min_margin < 0.055)
+        )
+    else:
+        pred_accept = False if local_err_bound >= min_margin else True
+
+    nodes = []
+    for idx, entity in enumerate(sg.nodes):
+        record = entity.to_dict()
+        record["match_prob"] = round(float(node_probs[idx]), 4)
+        nodes.append(record)
+
+    return {
+        "accepted": bool(pred_accept),
+        "status": "PASS" if pred_accept else "REJECT",
+        "goal": query.goal,
+        "selected_entity_id": node.entity_id,
+        "selected_color": node.attributes.get("color"),
+        "selected_shape": node.attributes.get("shape"),
+        "chosen_branch": STRATEGY_LIST[chosen_branch],
+        "branch_probs": {
+            STRATEGY_LIST[i]: round(float(branch_probs[i]), 4) for i in range(4)
+        },
+        "min_margin": round(float(min_margin), 4),
+        "local_error_bound": round(float(local_err_bound), 4),
+        "relation_matched": bool(rel_matched),
+        "nodes": nodes,
+        "source_modules": list(sg.source_modules),
+    }
+
+
 def evaluate_weights_on_suite(
     weights: TrainablePMVWeights, suite: List[Dict[str, Any]]
 ) -> Dict[str, float]:
@@ -291,85 +412,9 @@ def evaluate_weights_on_suite(
     false_accept, unstable_tot = 0, 0
 
     for item in suite:
-        sg = vision.encode_to_scene_graph(item["image"])
-        q: QueryConstraint = item["query"]
-        q_vec = encode_query_vector(q, sg, weights.embedding_dim)
-        ctx_feat = extract_scene_context_features(sg, q)
-
-        # 1. 前向计算节点匹配概率
-        raw_embs = np.stack([n.embedding for n in sg.nodes], axis=0)
-        proj_embs = raw_embs @ weights.w_vis_proj + weights.b_vis_proj
-        q_mat = proj_embs @ weights.w_q
-        k_mat = proj_embs @ weights.w_k
-        v_mat = proj_embs @ weights.w_v
-        attn = softmax((q_mat @ k_mat.T) / math.sqrt(weights.embedding_dim))
-        ctx_embs = proj_embs + attn @ v_mat
-        node_probs = softmax(ctx_embs @ (q_vec @ weights.w_match))
-
-        # 2. 策略路由选择分支
-        branch_probs = softmax(ctx_feat @ weights.policy_logits)
-        chosen_branch = int(np.argmax(branch_probs))
-
-        # 3. 根据所选分支与 RCVS 规则输出判定
-        ranked_indices = np.argsort(-node_probs)
-        chosen_idx = int(ranked_indices[0])
-        if chosen_branch == 1:
-            for idx in ranked_indices:
-                cand_node = sg.nodes[int(idx)]
-                if cand_node.attributes.get("occluded", False) and all(
-                    cand_node.attributes.get(k) == v
-                    for k, v in q.target_attributes.items()
-                ):
-                    chosen_idx = int(idx)
-                    break
-
-        node = sg.nodes[chosen_idx]
-        attr_matched = all(
-            node.attributes.get(k) == v for k, v in q.target_attributes.items()
-        )
-        min_margin = 0.0
-        rel_matched = False
-        if q.required_relations:
-            rel_type, ref_filter = q.required_relations[0]
-            for e in sg.find_edges(source_id=node.entity_id, relation_type=rel_type):
-                t_node = sg.get_node(e.target_id)
-                if t_node and all(
-                    t_node.attributes.get(k) == v for k, v in ref_filter.items()
-                ):
-                    rel_matched = True
-                    min_margin = max(min_margin, e.margin)
-
-        r = q.perturbation_radius
-        local_err_bound = 1.4142 * r + (r ** 2)
-        is_occluded = bool(node.attributes.get("occluded", False))
-
-        if chosen_branch == 0:
-            pred_accept = (
-                attr_matched
-                and (not is_occluded)
-                and rel_matched
-                and min_margin >= 0.055
-                and min_margin > local_err_bound
-            )
-        elif chosen_branch == 1:
-            pred_accept = (
-                attr_matched
-                and is_occluded
-                and rel_matched
-                and min_margin > local_err_bound
-            )
-        elif chosen_branch == 2:
-            pred_accept = (
-                attr_matched
-                and (not is_occluded)
-                and rel_matched
-                and (min_margin > local_err_bound)
-                and (min_margin < 0.055)
-            )
-        else:
-            pred_accept = False if local_err_bound >= min_margin else True
-
-        color_ok = node.attributes.get("color") == item["gt_color"]
+        result = infer_with_weights(weights, item["image"], item["query"], vision)
+        pred_accept = bool(result["accepted"])
+        color_ok = result["selected_color"] == item["gt_color"]
 
         split = item["split"]
         if split == "clean":

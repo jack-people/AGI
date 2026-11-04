@@ -29,13 +29,14 @@
     3. 不启动服务，直接对三条预设场景做推理冒烟：
         python3 -m New_Model.prototype.serve --self-check
     4. 启动本地推理服务（默认 http://127.0.0.1:8765 ，Ctrl+C 停止）：
-        python3 -m New_Model.prototype.serve
-    5. 另开一个终端调用：
-        curl http://127.0.0.1:8765/health
-        curl -X POST http://127.0.0.1:8765/predict -H 'Content-Type: application/json' -d '{"preset":"clean"}'
-        curl -X POST http://127.0.0.1:8765/predict -H 'Content-Type: application/json' -d '{"preset":"occluded"}'
-        curl -X POST http://127.0.0.1:8765/predict -H 'Content-Type: application/json' -d '{"preset":"unstable"}'
+        python3 -m New_Model.prototype.serve --host 0.0.0.0 --port 8765
+    5. 浏览器打开 http://127.0.0.1:8765/ ，或直接访问：
+        http://127.0.0.1:8765/predict?preset=clean
+        http://127.0.0.1:8765/predict?preset=occluded
+        http://127.0.0.1:8765/predict?preset=unstable
        预期：clean 与 occluded 的 accepted 为 true，unstable 的 accepted 为 false。
+       PowerShell 里 curl 是 Invoke-WebRequest 的别名，命令行请用 curl.exe，或：
+        Invoke-RestMethod http://127.0.0.1:8765/predict?preset=clean
 
 其他脚本：
     1. 三阶段训练并写出权重：

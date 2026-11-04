@@ -8,11 +8,18 @@
 冒烟测试（不启动端口，直接跑三条预设场景）：
     python3 -m New_Model.prototype.serve --self-check
 
-服务起来之后：
-    curl http://127.0.0.1:8765/health
-    curl -X POST http://127.0.0.1:8765/predict -H 'Content-Type: application/json' -d '{"preset":"clean"}'
-    curl -X POST http://127.0.0.1:8765/predict -H 'Content-Type: application/json' -d '{"preset":"occluded"}'
-    curl -X POST http://127.0.0.1:8765/predict -H 'Content-Type: application/json' -d '{"preset":"unstable"}'
+服务起来之后，用浏览器打开：
+    http://127.0.0.1:8765/
+
+也可以直接访问：
+    http://127.0.0.1:8765/health
+    http://127.0.0.1:8765/predict?preset=clean
+    http://127.0.0.1:8765/predict?preset=occluded
+    http://127.0.0.1:8765/predict?preset=unstable
+
+PowerShell 里 curl 是 Invoke-WebRequest 的别名，请用下面两种写法之一：
+    curl.exe http://127.0.0.1:8765/predict?preset=clean
+    Invoke-RestMethod http://127.0.0.1:8765/predict?preset=clean
 """
 
 from __future__ import annotations
@@ -21,6 +28,7 @@ import argparse
 import json
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Dict
+from urllib.parse import parse_qs, urlparse
 
 from .evaluate_checkpoint import CKPT_PATH, infer_with_weights
 from .modules.vision import SceneObjectSpec, VisionModuleV2, VisualSceneBuilder
@@ -138,25 +146,85 @@ def self_check(checkpoint: str) -> None:
     print("部署冒烟通过：清晰场景接受，遮挡场景接受，临界场景拒绝。")
 
 
+PAGE = """<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <title>PMV 推理测试</title>
+  <style>
+    body { font-family: sans-serif; margin: 2rem auto; max-width: 52rem; line-height: 1.5; }
+    button { margin-right: 0.5rem; padding: 0.4rem 0.8rem; }
+    pre { background: #f4f4f4; padding: 1rem; overflow: auto; }
+  </style>
+</head>
+<body>
+  <h1>PMV 推理测试</h1>
+  <p>服务已加载训练权重。点下面的场景，页面会调用 <code>POST /predict</code>。</p>
+  <p>
+    <button data-preset="clean">清晰场景 clean</button>
+    <button data-preset="occluded">遮挡场景 occluded</button>
+    <button data-preset="unstable">临界场景 unstable</button>
+  </p>
+  <p>预期：clean 与 occluded 接受，unstable 拒绝。</p>
+  <pre id="out">等待测试</pre>
+  <script>
+    const out = document.getElementById("out");
+    async function run(preset) {
+      out.textContent = "请求中: " + preset;
+      const response = await fetch("/predict", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ preset })
+      });
+      const data = await response.json();
+      out.textContent = JSON.stringify(data, null, 2);
+    }
+    document.querySelectorAll("button").forEach((button) => {
+      button.addEventListener("click", () => run(button.dataset.preset));
+    });
+    run("clean");
+  </script>
+</body>
+</html>
+"""
+
+
 def make_handler(app: InferenceApp):
     class Handler(BaseHTTPRequestHandler):
-        def _send(self, code: int, payload: Dict[str, Any]) -> None:
-            body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        def _send_bytes(self, code: int, body: bytes, content_type: str) -> None:
             self.send_response(code)
-            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Type", content_type)
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
 
+        def _send(self, code: int, payload: Dict[str, Any]) -> None:
+            body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+            self._send_bytes(code, body, "application/json; charset=utf-8")
+
         def do_GET(self) -> None:  # noqa: N802
-            if self.path.split("?", 1)[0] == "/health":
+            parsed = urlparse(self.path)
+            if parsed.path == "/":
+                self._send_bytes(200, PAGE.encode("utf-8"), "text/html; charset=utf-8")
+                return
+            if parsed.path == "/health":
                 self._send(200, app.health())
+                return
+            if parsed.path == "/predict":
+                preset = parse_qs(parsed.query).get("preset", ["clean"])[0]
+                try:
+                    self._send(200, app.predict(preset))
+                except KeyError:
+                    self._send(
+                        400,
+                        {"error": "未知 preset", "presets": list(app.presets.keys())},
+                    )
                 return
             self._send(
                 404,
                 {
                     "error": "未知路径",
-                    "hint": "GET /health 或 POST /predict {\"preset\":\"clean|occluded|unstable\"}",
+                    "hint": "打开 / ，或访问 /health 与 /predict?preset=clean",
                 },
             )
 
@@ -211,11 +279,8 @@ def main() -> None:
     server = ThreadingHTTPServer((args.host, args.port), make_handler(app))
     print(f"PMV 推理服务已启动: http://{args.host}:{args.port}")
     print(f"权重: {args.checkpoint}")
-    print("测试: curl http://127.0.0.1:%s/health" % args.port)
-    print(
-        "预测: curl -X POST http://127.0.0.1:%s/predict "
-        "-H 'Content-Type: application/json' -d '{\"preset\":\"clean\"}'" % args.port
-    )
+    print("浏览器打开: http://127.0.0.1:%s/" % args.port)
+    print("直接预测: http://127.0.0.1:%s/predict?preset=clean" % args.port)
     try:
         server.serve_forever()
     except KeyboardInterrupt:

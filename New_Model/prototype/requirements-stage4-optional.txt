@@ -1,0 +1,6 @@
+# 第四阶段可选开放词汇后端。默认色块识别只需要 numpy。
+# 按文字查找真实照片时再安装。torchvision 是 SAM 2 画掩膜要用的。
+torch
+torchvision
+transformers
+pillow

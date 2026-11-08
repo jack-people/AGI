@@ -1,0 +1,158 @@
+\documentclass[10pt,twocolumn]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{booktabs}
+\usepackage{graphicx}
+\usepackage{hyperref}
+\usepackage{geometry}
+\geometry{margin=0.78in}
+
+\title{\textbf{PMV: A Parallel Modular Vision-First Architecture with Requirement-Constrained Self-Verification for Relational Understanding}}
+
+\author{
+  Author Name(s) \\
+  Affiliation / Independent Research \\
+  \texttt{author@example.org}
+}
+
+\date{}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+Prevailing autoregressive Large Language Models (LLMs) and Vision-Language Models (VLMs) face two fundamental architectural bottlenecks when scaling toward genuine relational understanding: (1) \textbf{sequential inference bottlenecks}, where token-by-token generation prevents concurrent multi-hypothesis exploration and suffers from error cascading; and (2) \textbf{monolithic modality coupling}, where vision encoders are tightly bound to language backbones via unstructured latent vectors, making sensory upgrades (e.g., occlusion recovery, denoising) or new sensory extensions (e.g., robotic proprioception) prohibitively expensive. Furthermore, existing architectures struggle to distinguish statistical pattern imitation from causal relational understanding, lacking an intrinsic mechanism to verify precondition satisfaction and local perturbation stability without external critic models.
+
+To address these limitations, we propose \textbf{PMV (Parallel Modular Vision-First Architecture)}, a next-generation model architecture built upon two core pillars: \emph{full-stack parallelism} and \emph{vision-first modularity}. First, we introduce the \textbf{Structured Latent Protocol (SLP)}, which standardizes sensory modules as independent translators from raw sensory streams into explicit entity-relation scene graphs (\emph{Data $\rightarrow$ Structured Graph}). Under SLP, upgrading the vision module from a basic multi-stream encoder (\texttt{VisionModuleV1}) to an occlusion-aware, multi-scale denoised encoder (\texttt{VisionModuleV2}) requires zero modifications to the downstream reasoning or verification engine, while seamlessly accommodating plug-and-play proprioceptive modules. Second, PMV realizes three-tier parallelism: multi-stream sensory extraction, constant-depth relational graph attention, and $G$-way heterogeneous strategy rollouts integrated with \textbf{Group Relative Policy Optimization (GRPO)}. Finally, we unify discrete requirement verification with \textbf{calculus-based first-order Taylor and local linear error bounds} into an intrinsic \textbf{Requirement-Constrained Verification System (RCVS)}. Across a 120-task visual relational benchmark spanning clean, occluded/noisy, and boundary-critical regimes, PMV elevates occluded reasoning accuracy from $0.0\%$ to $100.0\%$, boosts overall accuracy from $56.67\%$ to $98.33\%$, eliminates false acceptance on unstable boundary states ($100.0\% \rightarrow 0.0\%$), and achieves a $3.34\times$--$4.12\times$ parallel rollout speedup.
+\end{abstract}
+
+\section{Introduction}
+Since the introduction of the Transformer \cite{vaswani2017attention}, autoregressive sequence modeling has driven remarkable progress across natural language processing and multimodal learning. Yet a foundational question remains: \emph{Is a model merely reproducing statistical patterns observed during training (imitation), or has it captured the underlying relational structure and validity conditions that govern a phenomenon (understanding)?}
+
+When evaluated against this criterion, current monolithic VLMs exhibit three structural limitations:
+\begin{enumerate}
+    \item \textbf{Sequential Rollout and Advantage Collapse:} Autoregressive CoT reasoning unfolds sequentially along a single path. While Group Relative Policy Optimization (GRPO) \cite{shao2024deepseekmath,guo2025deepseekr1} samples multiple trajectories to compute relative advantages, recent multimodal RL studies \cite{leng2026mmr1,liu2026mssr,dualgroup2026} reveal that sampling repeatedly from a homogeneous network under fixed visual inputs frequently produces identical rewards, causing zero reward variance and \emph{advantage collapse}.
+    \item \textbf{Tightly Coupled Sensory Backbones:} Biological perception relies on modular, parallel sensory pathways—primarily vision, complemented by touch, audition, and proprioception. In contrast, mainstream VLMs project patch tokens directly into an LLM's embedding space. Upgrading the visual backbone or adding robotic proprioception requires costly end-to-end realignment \cite{rapid2025}.
+    \item \textbf{Absence of Intrinsic Boundary Self-Verification:} Every valid conclusion depends on preconditions and a domain of applicability. Prompting an LLM to ``self-reflect'' without explicit constraints fails to reliably correct reasoning errors \cite{wu2024proco}. Moreover, discrete symbolic checks alone cannot detect when a continuous perceptual state lies perilously close to a decision boundary.
+\end{enumerate}
+
+In this paper, we present \textbf{PMV (Parallel Modular Vision-First Architecture)}. Our contributions are threefold:
+\begin{itemize}
+    \item \textbf{Bus-Oriented Modularity via SLP (Vision-First):} We formalize the Structured Latent Protocol (SLP), decoupling sensory translation from relational reasoning. We demonstrate zero-cost hot-swapping from \texttt{VisionModuleV1} to \texttt{VisionModuleV2} (recovering occluded geometry and suppressing sensor noise) and plug-and-play integration with a robotic \texttt{ProprioceptionModule}.
+    \item \textbf{Three-Tier Parallelism and Heterogeneous GRPO:} PMV executes parallel multi-stream visual extraction, synchronous relational graph attention, and $G$-branch heterogeneous hypothesis rollouts, preventing GRPO advantage vanishing while delivering a $3.34\times$--$4.12\times$ wall-clock speedup.
+    \item \textbf{Intrinsic Requirement and Calculus-Bounded Self-Verification (RCVS):} Without relying on a second critic model, PMV combines requirement constraint checking with first-order Jacobian and second-order Taylor remainder bounds to reject unstable conclusions near critical boundaries.
+\end{itemize}
+
+\section{Related Work}
+\paragraph{Modular Multimodal Architectures.}
+To avoid expensive vision-language retraining, RAPID \cite{rapid2025} decouples perception from reasoning by translating images into text descriptions optimized via reinforcement learning (VPO) for external LLM reasoners. SCOPE \cite{scope2025} introduces a Mixture-of-Encoders router to select specialized vision encoders per instance. Unlike text-mediated decoupling—which discards continuous spatial margins and Jacobian sensitivity—PMV uses a structured relational graph bus (SLP) that preserves both symbolic relations and continuous geometric margins.
+
+\paragraph{Neuro-Symbolic Scene Graphs.}
+Scene graphs provide interpretable relational grounding for VQA and reasoning, as demonstrated in SG-VLM \cite{sgvlm2025}, MuRelSGG \cite{murelsgg2025}, and NeuroRule \cite{neurorule2026}, which bridges pixel-level masks with differentiable logical rule induction. PMV advances this paradigm by introducing parallel multi-branch hypothesis rollouts and local linear perturbation verification over the scene graph.
+
+\paragraph{Multimodal GRPO and Self-Verification.}
+StepGRPO (R1-VL) \cite{r1vl2025} and Share-GRPO \cite{sharegrpo2025} adapt group-relative RL to MLLMs, while MMR1 \cite{leng2026mmr1} and MSSR \cite{liu2026mssr} address gradient vanishing caused by low intra-group reward variance. For self-verification, Self-Verification \cite{weng2023self} and ProCo \cite{wu2024proco} verify key discrete conditions via masking. PMV bridges these threads by coupling heterogeneous parallel rollouts with both discrete key-condition checks and continuous Taylor error bounds.
+
+\section{Methodology}
+
+\subsection{Structured Latent Protocol (SLP) and Modular Vision}
+Let $\mathcal{X} = \{X_m\}_{m \in \mathcal{M}}$ denote raw inputs across active sensory modalities. Each perception module $\Phi_m$ translates $X_m$ into a standardized scene graph $\mathcal{S}_m = (\mathcal{V}_m, \mathcal{E}_m)$:
+\begin{equation}
+    v_i = (\text{id}_i, m_i, \mathbf{b}_i, \mathcal{A}_i, \mathbf{z}_i, c_i), \quad
+    e_{ij}^{(k)} = (\text{id}_i, \text{id}_j, r_k, w_{ij}^{(k)}, \delta_{ij}^{(k)})
+\end{equation}
+where $\mathbf{b}_i \in [0,1]^4$ is the normalized bounding box with center $\mathbf{p}_i = (c_{y,i}, c_{x,i})$, $\mathcal{A}_i$ is a dictionary of structured attributes, $\mathbf{z}_i \in \mathbb{R}^d$ is a unit-norm embedding, $c_i \in [0,1]$ is confidence, and $\delta_{ij}^{(k)} \ge 0$ is the continuous geometric margin of relation $r_k$.
+
+Within the vision module, three streams execute in parallel: (1) \emph{Spectral Color Stream}, matching pixels against color prototypes; (2) \emph{Edge Geometry Stream}, computing spatial gradients $G_x, G_y$; and (3) \emph{Spatial Topology Stream}, estimating fill ratios $\rho_i$ and pairwise relations. In the upgraded \texttt{VisionModuleV2}, a $3\times 3$ vectorized median filter and morphological majority voting suppress salt-and-pepper noise, while an occlusion analyzer detects when object $v_b$ occupies missing pixels inside $\mathbf{b}_a$, emitting an explicit \texttt{occludes} edge and restoring $v_a$'s occluded area:
+\begin{equation}
+    \widehat{\text{Area}}(a) = \text{Area}_{\text{vis}}(a) + |\Omega_{\text{miss}}(a) \cap \text{Mask}(b)|.
+\end{equation}
+
+\subsection{Parallel Relational Core and Heterogeneous GRPO}
+Given node embeddings $H^{(0)} \in \mathbb{R}^{N \times d}$, PMV constructs an explicit relational bias matrix $B_{ij} = \sum_{k} \beta_{r_k} w_{ij}^{(k)}$ and performs synchronous message passing across all entities:
+\begin{equation}
+    H^{(l+1)} = \text{LayerNorm}\!\left(H^{(l)} + \text{Softmax}\!\left(\frac{H^{(l)}W_Q (H^{(l)}W_K)^T}{\sqrt{d}} + B\right)\!H^{(l)}W_V\right).
+\end{equation}
+
+Subsequently, $G=4$ heterogeneous reasoning branches execute in parallel: $h_0$ (\texttt{strict\_high\_margin}, requiring $\delta_{ij} \ge 0.05$), $h_1$ (\texttt{occlusion\_compensated}), $h_2$ (\texttt{transitive\_relational}, performing 2-hop relational deduction), and $h_3$ (\texttt{counterfactual\_boundary}). Given verified branch rewards $\{R_g\}_{g=1}^G$, the group-relative advantage is computed without an external critic:
+\begin{equation}
+    A_g = \frac{R_g - \mu_R}{\sigma_R + \epsilon}, \quad \mu_R = \frac{1}{G}\sum_{g=1}^G R_g, \quad \sigma_R = \sqrt{\frac{1}{G}\sum_{g=1}^G (R_g - \mu_R)^2}.
+\end{equation}
+
+\subsection{Requirement-Constrained Self-Verification (RCVS) with Local Linear Bounds}
+For a query $Q = (\mathcal{G}, \mathcal{C}_{\text{attr}}, \mathcal{C}_{\text{rel}}, \varepsilon_{\max}, r)$ with perturbation radius $r$, RCVS evaluates both discrete constraint satisfaction $S_{\text{cons}}(h_g) \in [0,1]$ and continuous local stability. For a pairwise spatial function $f(\mathbf{x}) = \mathbf{p}_j - \mathbf{p}_i$, a first-order Taylor expansion with Lagrangian remainder bounds the maximum perturbation deviation over $\|\Delta \mathbf{x}\|_2 \le r$:
+\begin{equation}
+    \varepsilon_{\text{bound}}(r) = \sup_{\|\Delta \mathbf{x}\|_2 \le r} |f(\mathbf{x}_0 + \Delta \mathbf{x}) - f(\mathbf{x}_0)| \le \|J_f(\mathbf{x}_0)\|_2 \, r + \frac{1}{2} M r^2
+\end{equation}
+where $\|J_f(\mathbf{x}_0)\|_2 = \sqrt{2}$ and $M$ bounds the local curvature. Let $\delta_{\min} = \min_{e} \delta_e$ be the minimum relational margin of the candidate entity. Stability is certified (\texttt{PASS}) if and only if:
+\begin{equation}
+    \delta_{\min} > \varepsilon_{\text{bound}}(r) \quad \text{and} \quad \varepsilon_{\text{bound}}(r) \le \varepsilon_{\max}.
+\end{equation}
+Otherwise, the candidate resides in an unstable boundary regime and is flagged as \texttt{REVISE} or \texttt{UNKNOWN}. The total branch reward is $R_g = 0.55 S_{\text{cons}}(h_g) + 0.30 S_{\text{stab}}(h_g) + 0.15 c(h_g)$.
+
+\section{Experiments}
+We evaluate PMV on a 120-task visual relational benchmark (\texttt{benchmark.py}) partitioned into three splits: \textbf{Clean} (40 tasks), \textbf{Occluded \& Noisy} (40 tasks with partial object occlusion and $3.5\%$ salt-and-pepper noise), and \textbf{Boundary-Critical} (40 tasks comprising 20 safe-margin, 10 moderate-margin, and 10 perturbation-unstable cases where $\delta_{\min} = 0.046 < \varepsilon_{\text{bound}}(0.038) = 0.0552$).
+
+\begin{table}[t]
+\centering
+\caption{Ablation study across 120 visual relational tasks. FAR denotes False Acceptance Rate on unstable boundary states (lower is better).}
+\label{tab:ablation}
+\resizebox{\columnwidth}{!}{
+\begin{tabular}{lccccccc}
+\toprule
+\textbf{Configuration} & \textbf{Vision} & $G$ & \textbf{RCVS} & \textbf{Clean} & \textbf{Occ+Noise} & \textbf{Boundary} & \textbf{Overall} / \textbf{FAR} \\
+\midrule
+A0: Baseline & V1 & 1 & No & 95.0\% & 0.0\% & 75.0\% & 56.67\% / --- \\
+A1: V1 + RCVS & V1 & 4 & Full & 95.0\% & 0.0\% & \textbf{100.0\%} & 65.00\% / \textbf{0.0\%} \\
+A2: Hot-Swap V2 & V2 & 1 & No & 95.0\% & \textbf{100.0\%} & 75.0\% & 90.00\% / --- \\
+A3: Constraint-Only & V2 & 4 & Disc. & 95.0\% & \textbf{100.0\%} & 75.0\% & 90.00\% / 100.0\% \\
+\textbf{A4: Full PMV} & \textbf{V2} & \textbf{4} & \textbf{Full} & \textbf{95.0\%} & \textbf{100.0\%} & \textbf{100.0\%} & \textbf{98.33\%} / \textbf{0.0\%} \\
+\bottomrule
+\end{tabular}
+}
+\end{table}
+
+\begin{table}[t]
+\centering
+\caption{Multi-branch rollout latency (median ms) and parallel speedup.}
+\label{tab:scaling}
+\begin{tabular}{cccc}
+\toprule
+\textbf{Branches $G$} & \textbf{Serial (ms)} & \textbf{Parallel (ms)} & \textbf{Speedup} \\
+\midrule
+$G=1$ & 14.45 & 15.09 & $0.96\times$ \\
+$G=2$ & 27.20 & 16.64 & $\mathbf{1.63\times}$ \\
+$G=4$ & 54.63 & 16.34 & $\mathbf{3.34\times}$ (peak $4.12\times$) \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{Results Analysis.}
+Table~\ref{tab:ablation} highlights three findings:
+(1) \textbf{Zero-Code-Change Modular Upgrade:} Hot-swapping \texttt{VisionModuleV1} to \texttt{VisionModuleV2} (A1 $\rightarrow$ A4) increases accuracy on occluded and noisy scenes from $0.0\%$ to $100.0\%$ without touching the core engine.
+(2) \textbf{Necessity of Calculus Bounds:} Checking only discrete constraints (A3) results in a $100.0\%$ False Acceptance Rate on perturbation-sensitive boundary cases, whereas Full PMV (A4) achieves $0.0\%$ FAR and $98.33\%$ overall accuracy.
+(3) \textbf{Parallel Speedup:} Table~\ref{tab:scaling} shows that 4-branch parallel execution maintains near-constant latency ($\sim 16.3\text{ ms}$) compared to serial rollout ($54.6\text{ ms}$), yielding a $3.34\times$--$4.12\times$ speedup while maintaining non-degenerate GRPO advantages ($A = [+1.363, +0.375, -0.375, -1.363]$).
+
+\section{Conclusion}
+We presented PMV, a next-generation model architecture uniting vision-first modularity via the Structured Latent Protocol, full-stack parallel relational rollouts with GRPO, and requirement-constrained self-verification bounded by local linear calculus approximations.
+
+\begin{thebibliography}{99}
+\bibitem{vaswani2017attention} A. Vaswani et al., ``Attention is all you need,'' \emph{NeurIPS}, 2017.
+\bibitem{shao2024deepseekmath} Z. Shao et al., ``DeepSeekMath: Pushing the limits of mathematical reasoning in open language models,'' \emph{arXiv:2402.03300}, 2024.
+\bibitem{guo2025deepseekr1} D. Guo et al., ``DeepSeek-R1: Incentivizing reasoning capability in LLMs via reinforcement learning,'' \emph{arXiv:2501.12948}, 2025.
+\bibitem{weng2023self} Y. Weng et al., ``Large language models are better reasoners with self-verification,'' \emph{Findings of EMNLP}, 2023.
+\bibitem{wu2024proco} Z. Wu et al., ``Large language models can self-correct with key condition verification,'' \emph{EMNLP}, pp. 12846--12867, 2024.
+\bibitem{r1vl2025} D. Zhang et al., ``R1-VL: Learning to reason with multimodal large language models via step-wise group relative policy optimization,'' \emph{arXiv:2503.12937}, 2025.
+\bibitem{rapid2025} ``Reasoning-aligned perception decoupling for scalable multi-modal reasoning (RAPID),'' \emph{arXiv:2506.04559}, 2025.
+\bibitem{scope2025} ``SCOPE: Selective cross-modal orchestration of visual perception experts,'' \emph{arXiv:2510.12974}, 2025.
+\bibitem{sgvlm2025} ``Bridging vision language models and symbolic grounding for video question answering (SG-VLM),'' \emph{arXiv:2509.11862}, 2025.
+\bibitem{sharegrpo2025} ``R1-ShareVL: Incentivizing reasoning capability of multimodal large language models via Share-GRPO,'' \emph{NeurIPS}, 2025.
+\bibitem{neurorule2026} Zarar et al., ``NeuroRule: Bridging vision and logic with differentiable rule induction,'' \emph{CVPR}, 2026.
+\bibitem{leng2026mmr1} Leng et al., ``MMR1: Enhancing multimodal reasoning with variance-aware sampling,'' \emph{CVPR}, 2026.
+\bibitem{liu2026mssr} Liu et al., ``Stable and efficient single-rollout RL for multimodal reasoning,'' \emph{CVPR}, 2026.
+\bibitem{dualgroup2026} ``Dual-group exploration: Reinforcement learning for video understanding in MLLMs,'' \emph{Findings of EMNLP}, 2026.
+\bibitem{murelsgg2025} M. J. Khan et al., ``MuRelSGG: Multimodal relationship prediction for neurosymbolic scene graph generation,'' \emph{IEEE Access}, 2025.
+\end{thebibliography}
+
+\end{document}

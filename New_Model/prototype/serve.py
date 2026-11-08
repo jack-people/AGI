@@ -46,6 +46,7 @@ from .modules.vision_v3 import (
     Detection,
     OwlVitDetector,
     RecordedDetector,
+    Sam2MaskRefiner,
     VisionModuleV3,
     build_cup_book_demo,
 )
@@ -162,6 +163,8 @@ class InferenceApp:
         self.vision = VisionModuleV2(embedding_dim=self.weights.embedding_dim)
         self.presets = build_presets()
         self.checkpoint = checkpoint
+        self.open_detector = OwlVitDetector()
+        self.mask_refiner = Sam2MaskRefiner()
 
     def health(self) -> Dict[str, Any]:
         return {
@@ -216,30 +219,43 @@ class InferenceApp:
         check_relation: bool = False,
     ) -> Dict[str, Any]:
         """用开放词汇检测结果构建场景图。没有检测框时才尝试加载 OWL-ViT。"""
-        query_list = [str(item) for item in (queries or [])]
+        query_list = [str(item).strip() for item in (queries or []) if str(item).strip()]
         parsed = [_detection_from_payload(item) for item in (detections or [])]
+        masks_ready = False
         if parsed:
-            module = VisionModuleV3(
-                detector=RecordedDetector(parsed),
-                queries=query_list,
-            )
-            raw: Dict[str, Any] = {
-                "image": image,
-                "queries": query_list,
-                "detections": parsed,
-            }
+            found = parsed
+            detector_name = "recorded"
         else:
-            module = VisionModuleV3(detector=OwlVitDetector(), queries=query_list)
-            raw = {"image": image, "queries": query_list}
+            if not query_list:
+                raise ValueError("按文字查找时需要填写查询词，例如 cup, book")
+            found = self.open_detector.detect(image, query_list)
+            found = self.mask_refiner.refine(image, found)
+            masks_ready = any(item.mask is not None for item in found)
+            detector_name = "owlvit+sam2" if masks_ready else "owlvit"
+        module = VisionModuleV3(
+            detector=RecordedDetector(found),
+            queries=query_list,
+            score_threshold=0.05,
+        )
+        raw: Dict[str, Any] = {
+            "image": image,
+            "queries": query_list,
+            "detections": found,
+        }
         scene = module.encode_to_scene_graph(raw)
-        payload = _describe_scene(scene, image.shape[:2])
+        payload = _describe_scene(scene, image.shape[:2], found)
         payload["stage"] = 4
         payload["queries"] = query_list
+        payload["detector"] = detector_name
         if payload["entity_count"] == 0:
             payload["summary"] = (
-                "没有识别到给出的类别。可以传入 detections 检测框，"
-                "或安装 torch、transformers、pillow 后让 OWL-ViT 按文字查询。"
+                "没有找到这些词对应的物体。查询用英文更稳，例如 cup, book。"
+                "第一次查找会下载 OWL-ViT 权重。"
             )
+        elif masks_ready:
+            payload["summary"] += "边界已用 SAM 2 描出。"
+        elif detector_name == "owlvit" and self.mask_refiner.error:
+            payload["summary"] += "当前显示的是检测框。"
         if check_relation and payload["entity_count"] >= 2:
             engine = NextGenModelEngine(vision_module=module, num_branches=4)
             checked = engine.run(
@@ -277,11 +293,20 @@ def _detection_from_payload(item: Any) -> Detection:
     )
 
 
-def _describe_scene(scene: StructuredSceneGraph, image_size: tuple) -> Dict[str, Any]:
+def _describe_scene(
+    scene: StructuredSceneGraph,
+    image_size: tuple,
+    detections: Optional[list] = None,
+) -> Dict[str, Any]:
     entities = []
     for node in scene.nodes:
         item = node.to_dict()
         item["label"] = _node_label(node.attributes)
+        mask = _mask_for_node(node, detections)
+        if mask is not None:
+            item["mask_png_base64"] = base64.b64encode(
+                _mask_png(np.asarray(mask, dtype=bool))
+            ).decode("ascii")
         entities.append(item)
     relations = []
     for edge in scene.edges:
@@ -301,9 +326,13 @@ def _describe_scene(scene: StructuredSceneGraph, image_size: tuple) -> Dict[str,
     if entities:
         names = "、".join(item["label"] for item in entities)
         relation_text = "；".join(
-            item["sentence"]
-            for item in relations
-            if item["relation"] in ("left_of", "above", "occludes")
+            list(
+                dict.fromkeys(
+                    item["sentence"]
+                    for item in relations
+                    if item["relation"] in ("left_of", "above", "occludes")
+                )
+            )[:6]
         )
         summary = f"识别到 {len(entities)} 个物体：{names}。"
         if relation_text:
@@ -320,14 +349,44 @@ def _describe_scene(scene: StructuredSceneGraph, image_size: tuple) -> Dict[str,
     }
 
 
+def _mask_for_node(node: Any, detections: Optional[list]) -> Optional[np.ndarray]:
+    if not detections:
+        return None
+    best = None
+    best_distance = 0.08
+    cy, cx = node.bbox.center
+    for item in detections:
+        mask = getattr(item, "mask", None)
+        if mask is None:
+            continue
+        iy = (float(item.y_min) + float(item.y_max)) / 2.0
+        ix = (float(item.x_min) + float(item.x_max)) / 2.0
+        distance = abs(iy - cy) + abs(ix - cx)
+        if distance < best_distance:
+            best = mask
+            best_distance = distance
+    return None if best is None else np.asarray(best, dtype=bool)
+
+
+def _mask_png(mask: np.ndarray) -> bytes:
+    """把二值掩膜画成半透明绿色 PNG，给页面叠在原图上。"""
+    height, width = mask.shape
+    rgba = np.zeros((height, width, 4), dtype=np.float64)
+    rgba[mask, 1] = 0.85
+    rgba[mask, 3] = 0.45
+    return png_bytes(rgba)
+
+
 def png_bytes(image: np.ndarray) -> bytes:
-    """把 0–1 RGB 图像编码成 PNG，供浏览器示例按钮使用。"""
+    """把 0–1 的 RGB 或 RGBA 图像编码成 PNG。"""
     import struct
     import zlib
 
-    rgb = np.clip(np.asarray(image, dtype=np.float64), 0.0, 1.0)
-    height, width, _ = rgb.shape
-    raw = (rgb * 255.0).astype(np.uint8)
+    array = np.clip(np.asarray(image, dtype=np.float64), 0.0, 1.0)
+    height, width, channels = array.shape
+    if channels not in (3, 4):
+        raise ValueError("PNG 只接受 3 或 4 个通道")
+    raw = (array * 255.0).astype(np.uint8)
     rows = b"".join(b"\x00" + raw[y].tobytes() for y in range(height))
 
     def chunk(tag: bytes, data: bytes) -> bytes:
@@ -338,7 +397,8 @@ def png_bytes(image: np.ndarray) -> bytes:
             + struct.pack(">I", zlib.crc32(tag + data) & 0xFFFFFFFF)
         )
 
-    ihdr = struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0)
+    color_type = 6 if channels == 4 else 2
+    ihdr = struct.pack(">IIBBBBB", width, height, 8, color_type, 0, 0, 0)
     return (
         b"\x89PNG\r\n\x1a\n"
         + chunk(b"IHDR", ihdr)
@@ -393,9 +453,13 @@ PAGE = """<!DOCTYPE html>
     <input id="file" type="file" accept="image/*">
     <button id="example" type="button">用内置示例图</button>
   </p>
-  <h2>第四阶段：开放词汇</h2>
-  <p>检测器给出类别和位置之后，原来的关系推理直接使用。下面这张示例图里，杯子在书的左侧。上传的普通照片仍然走上面的色块识别；要把 SAM 或 Grounding DINO 的框送进来，请 POST /recognize_open 并带上 detections。</p>
-  <p><button id="open-demo" type="button">看杯子和书</button></p>
+  <h2>按文字找真实物体</h2>
+  <p>先填写英文词，再选择照片，然后点「按文字查找」。OWL-ViT 负责找框，SAM 2 负责把框收成物体边界，原来的左右和上下关系接着用。查询留空时，选图仍只认颜色和形状。第一次查找会下载权重。SAM 2 还需要 torchvision。</p>
+  <p>
+    <input id="queries" type="text" size="42" placeholder="cup, book">
+    <button id="find" type="button">按文字查找</button>
+    <button id="open-demo" type="button">看杯子和书</button>
+  </p>
   <canvas id="view" width="320" height="320"></canvas>
   <p id="summary">还没有图片。</p>
   <ul id="entities"></ul>
@@ -421,17 +485,25 @@ PAGE = """<!DOCTYPE html>
       ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
       ctx.lineWidth = 2;
       ctx.font = "14px sans-serif";
-      for (const entity of result.entities || []) {
+      const palette = ["#d22", "#24a", "#e80", "#2a2", "#72b", "#1aa"];
+      (result.entities || []).forEach((entity, index) => {
         const box = entity.bbox;
         const x = box.x_min * canvas.width;
         const y = box.y_min * canvas.height;
         const w = (box.x_max - box.x_min) * canvas.width;
         const h = (box.y_max - box.y_min) * canvas.height;
-        ctx.strokeStyle = colors[entity.attributes.color] || "#111";
+        ctx.strokeStyle = colors[entity.attributes.color] || palette[index % palette.length];
         ctx.strokeRect(x, y, w, h);
         ctx.fillStyle = ctx.strokeStyle;
         ctx.fillText(entity.label, x + 2, Math.max(14, y - 2));
-      }
+        if (entity.mask_png_base64) {
+          const overlay = new Image();
+          overlay.onload = () => {
+            ctx.drawImage(overlay, 0, 0, canvas.width, canvas.height);
+          };
+          overlay.src = "data:image/png;base64," + entity.mask_png_base64;
+        }
+      });
       summary.textContent = result.summary || "";
       entityList.replaceChildren(...(result.entities || []).map((entity) => {
         const item = document.createElement("li");
@@ -448,22 +520,33 @@ PAGE = """<!DOCTYPE html>
       }));
     }
 
-    async function recognizePixels(width, height, rgba, sourceImage) {
-      summary.textContent = "识别中…";
+    function queryList() {
+      return document.getElementById("queries").value
+        .split(/[,，]/)
+        .map((item) => item.trim())
+        .filter(Boolean);
+    }
+
+    async function recognizePixels(width, height, rgba, sourceImage, queries) {
+      summary.textContent = queries.length
+        ? "按文字查找中。第一次会下载 OWL-ViT 和 SAM 2 权重，请等待。"
+        : "识别中…";
       const bytes = new Uint8Array(rgba);
       let binary = "";
       const chunk = 0x8000;
       for (let i = 0; i < bytes.length; i += chunk) {
         binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
       }
-      const response = await fetch("/recognize", {
+      const payload = {
+        width,
+        height,
+        rgba_base64: btoa(binary)
+      };
+      if (queries.length) payload.queries = queries;
+      const response = await fetch(queries.length ? "/recognize_open" : "/recognize", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          width,
-          height,
-          rgba_base64: btoa(binary)
-        })
+        body: JSON.stringify(payload)
       });
       const result = await response.json();
       if (!response.ok) {
@@ -473,11 +556,11 @@ PAGE = """<!DOCTYPE html>
       drawResult(sourceImage, result);
     }
 
-    async function recognizeFile(file) {
+    async function recognizeFile(file, queries) {
       const image = new Image();
       image.src = URL.createObjectURL(file);
       await image.decode();
-      const maxSide = 256;
+      const maxSide = queries.length ? 512 : 256;
       const scale = Math.min(1, maxSide / Math.max(image.width, image.height));
       const width = Math.max(8, Math.round(image.width * scale));
       const height = Math.max(8, Math.round(image.height * scale));
@@ -487,17 +570,29 @@ PAGE = """<!DOCTYPE html>
       const scratchCtx = scratch.getContext("2d");
       scratchCtx.drawImage(image, 0, 0, width, height);
       const rgba = scratchCtx.getImageData(0, 0, width, height).data;
-      await recognizePixels(width, height, rgba, image);
+      await recognizePixels(width, height, rgba, image, queries);
       URL.revokeObjectURL(image.src);
     }
 
     fileInput.addEventListener("change", () => {
-      if (fileInput.files[0]) recognizeFile(fileInput.files[0]);
+      if (fileInput.files[0]) recognizeFile(fileInput.files[0], queryList());
+    });
+    document.getElementById("find").addEventListener("click", () => {
+      const queries = queryList();
+      if (!queries.length) {
+        summary.textContent = "请先填写要找的英文词，例如 cup, book。";
+        return;
+      }
+      if (!fileInput.files[0]) {
+        summary.textContent = "请先选择一张照片。";
+        return;
+      }
+      recognizeFile(fileInput.files[0], queries);
     });
     document.getElementById("example").addEventListener("click", async () => {
       const response = await fetch("/example.png");
       const blob = await response.blob();
-      await recognizeFile(new File([blob], "example.png", { type: "image/png" }));
+      await recognizeFile(new File([blob], "example.png", { type: "image/png" }), []);
     });
     document.getElementById("open-demo").addEventListener("click", async () => {
       summary.textContent = "识别中…";

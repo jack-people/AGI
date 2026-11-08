@@ -25,6 +25,7 @@ from New_Model.prototype.modules.vision_v3 import (
     Detection,
     OwlVitDetector,
     RecordedDetector,
+    Sam2MaskRefiner,
     VisionModuleV3,
     build_cup_book_demo,
 )
@@ -314,9 +315,18 @@ class TestNextGenModelArchitecture(unittest.TestCase):
 
     def test_owl_backend_reports_missing_install(self) -> None:
         detector = OwlVitDetector()
-        with self.assertRaises(RuntimeError) as caught:
-            detector.detect(np.zeros((16, 16, 3)), ["cup"])
-        self.assertIn("VisionModuleV3", str(caught.exception))
+        try:
+            import torch  # noqa: F401
+            from transformers import OwlViTForObjectDetection  # noqa: F401
+        except ModuleNotFoundError:
+            with self.assertRaises(RuntimeError) as caught:
+                detector.detect(np.zeros((16, 16, 3)), ["cup"])
+            self.assertIn("VisionModuleV3", str(caught.exception))
+            return
+        self.assertIsNone(detector._model)
+        refiner = Sam2MaskRefiner()
+        self.assertEqual(refiner.refine(np.zeros((8, 8, 3)), []), [])
+        self.assertIsNone(refiner._model)
 
     def test_three_stage_training_pipeline_and_checkpoint(self) -> None:
         """测试点 5：三阶段训练管线 (视觉对齐 -> SFT 模仿 -> GRPO+RCVS 理解) 收敛并生成权重成果。"""

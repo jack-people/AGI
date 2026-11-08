@@ -79,7 +79,7 @@ class OwlVitDetector:
     def __init__(
         self,
         model_name: str = "google/owlvit-base-patch32",
-        score_threshold: float = 0.12,
+        score_threshold: float = 0.10,
     ) -> None:
         self.model_name = model_name
         self.score_threshold = score_threshold
@@ -122,22 +122,29 @@ class OwlVitDetector:
         inputs = self._processor(text=[labels], images=picture, return_tensors="pt")
         with torch.no_grad():
             outputs = self._model(**inputs)
-        target_sizes = torch.tensor([picture.size[::-1]])
-        processed = self._processor.post_process_object_detection(
+        height, width = pixels.shape[:2]
+        processed = self._processor.post_process_grounded_object_detection(
             outputs,
             threshold=self.score_threshold,
-            target_sizes=target_sizes,
+            target_sizes=[(height, width)],
+            text_labels=[labels],
         )[0]
-        height, width = pixels.shape[:2]
         detections: List[Detection] = []
         boxes = processed["boxes"].detach().cpu().numpy()
         scores = processed["scores"].detach().cpu().numpy()
-        label_ids = processed["labels"].detach().cpu().numpy()
-        for box, score, label_id in zip(boxes, scores, label_ids):
+        names = processed.get("text_labels")
+        label_ids = processed["labels"]
+        if hasattr(label_ids, "detach"):
+            label_ids = label_ids.detach().cpu().numpy()
+        for index, (box, score) in enumerate(zip(boxes, scores)):
+            if names:
+                category = str(names[index])
+            else:
+                category = labels[int(label_ids[index])]
             x0, y0, x1, y1 = [float(value) for value in box]
             detections.append(
                 Detection(
-                    category=labels[int(label_id)],
+                    category=category,
                     score=float(score),
                     y_min=y0 / max(1.0, height),
                     x_min=x0 / max(1.0, width),
@@ -145,7 +152,148 @@ class OwlVitDetector:
                     x_max=x1 / max(1.0, width),
                 )
             )
-        return detections
+        return _suppress_overlaps(detections)
+
+
+def _box_iou(a: Detection, b: Detection) -> float:
+    inter_y = max(0.0, min(a.y_max, b.y_max) - max(a.y_min, b.y_min))
+    inter_x = max(0.0, min(a.x_max, b.x_max) - max(a.x_min, b.x_min))
+    inter = inter_y * inter_x
+    union = a.y_max - a.y_min
+    union = union * (a.x_max - a.x_min) + (b.y_max - b.y_min) * (b.x_max - b.x_min) - inter
+    return inter / max(1e-6, union)
+
+
+def _suppress_overlaps(detections: Sequence[Detection], iou_limit: float = 0.45) -> List[Detection]:
+    """同一类别里重叠过高的框只保留分数更高的一个。"""
+    kept: List[Detection] = []
+    for item in sorted(detections, key=lambda det: det.score, reverse=True):
+        if any(
+            other.category.casefold() == item.category.casefold()
+            and _box_iou(item, other) >= iou_limit
+            for other in kept
+        ):
+            continue
+        kept.append(item)
+        if len(kept) >= 8:
+            break
+    return kept
+
+
+class Sam2MaskRefiner:
+    """用检测框作为提示，让 SAM 2 画出物体掩膜。权重按需下载，失败时保留原来的框。"""
+
+    def __init__(self, model_name: str = "facebook/sam2.1-hiera-tiny") -> None:
+        self.model_name = model_name
+        self._model = None
+        self._processor = None
+        self._torch = None
+        self.error: Optional[str] = None
+
+    def _ensure(self) -> None:
+        if self._model is not None:
+            return
+        try:
+            import torch
+            from transformers import Sam2Model, Sam2Processor
+        except ModuleNotFoundError as exc:
+            raise RuntimeError(
+                "SAM 2 需要 torch、transformers 和 pillow。"
+            ) from exc
+        self._processor = Sam2Processor.from_pretrained(self.model_name)
+        self._model = Sam2Model.from_pretrained(self.model_name)
+        self._model.eval()
+        self._torch = torch
+
+    def refine(
+        self, image: np.ndarray, detections: Sequence[Detection]
+    ) -> List[Detection]:
+        items = list(detections)
+        if not items:
+            return items
+        try:
+            return self._refine_loaded(image, items)
+        except Exception as exc:
+            self.error = str(exc)
+            return items
+
+    def _refine_loaded(
+        self, image: np.ndarray, items: List[Detection]
+    ) -> List[Detection]:
+        self._ensure()
+        torch = self._torch
+        array = np.asarray(image, dtype=np.float64)
+        peak = float(array.max()) if array.size else 0.0
+        if peak <= 1.0:
+            array = array * 255.0
+        pixels = np.clip(array, 0, 255).astype(np.uint8)
+        from PIL import Image
+
+        picture = Image.fromarray(pixels, mode="RGB")
+        height, width = pixels.shape[:2]
+        boxes = [
+            [
+                item.x_min * width,
+                item.y_min * height,
+                item.x_max * width,
+                item.y_max * height,
+            ]
+            for item in items
+        ]
+        inputs = self._processor(
+            images=picture, input_boxes=[boxes], return_tensors="pt"
+        )
+        with torch.no_grad():
+            outputs = self._model(**inputs, multimask_output=False)
+        processed = self._processor.post_process_masks(
+            outputs.pred_masks, inputs["original_sizes"]
+        )
+        mask_batch = processed[0]
+        if hasattr(mask_batch, "detach"):
+            mask_batch = mask_batch.detach().cpu().numpy()
+        else:
+            mask_batch = np.asarray(mask_batch)
+        refined: List[Detection] = []
+        for index, item in enumerate(items):
+            mask = _pick_mask(mask_batch, index, (height, width))
+            refined.append(
+                Detection(
+                    category=item.category,
+                    score=item.score,
+                    y_min=item.y_min,
+                    x_min=item.x_min,
+                    y_max=item.y_max,
+                    x_max=item.x_max,
+                    mask=mask,
+                    attributes=dict(item.attributes),
+                )
+            )
+        self.error = None
+        return refined
+
+
+def _pick_mask(
+    mask_batch: np.ndarray, index: int, shape: tuple[int, int]
+) -> Optional[np.ndarray]:
+    """从 SAM 输出里取出第 index 个框对应的二值掩膜。"""
+    array = np.squeeze(np.asarray(mask_batch))
+    if array.ndim == 2:
+        chosen = array
+    elif array.ndim == 3:
+        if array.shape[0] == shape[0] and array.shape[1] == shape[1]:
+            chosen = array[:, :, min(index, array.shape[-1] - 1)]
+        else:
+            chosen = array[min(index, array.shape[0] - 1)]
+    elif array.ndim >= 4:
+        chosen = array[min(index, array.shape[0] - 1)]
+        chosen = np.squeeze(chosen)
+        if chosen.ndim == 3:
+            chosen = chosen[0]
+    else:
+        return None
+    if chosen.shape != shape:
+        return None
+    return chosen.astype(bool)
 
 
 def _stable_unit(text: str) -> np.ndarray:
@@ -251,12 +399,16 @@ class VisionModuleV3(VisionModuleV1):
             mask = self._mask_for(detection.mask, image.shape[:2], bbox)
             if mask is not None:
                 masks[entity_id] = mask
+            visible_area = float(bbox.area)
+            if mask is not None:
+                visible_area = float(np.count_nonzero(mask)) / float(height * width)
             attributes = {
                 "category": detection.category,
-                "visible_area": round(float(bbox.area), 4),
+                "visible_area": round(visible_area, 4),
                 "estimated_area": round(float(bbox.area), 4),
                 "occluded": False,
                 "score": round(float(detection.score), 4),
+                "has_mask": mask is not None,
             }
             attributes.update(detection.attributes)
             nodes.append(
@@ -354,6 +506,8 @@ class VisionModuleV3(VisionModuleV1):
                     overlap = float(np.count_nonzero(src_mask & dst_mask))
                     base = float(np.count_nonzero(dst_mask))
                     ratio = overlap / max(1.0, base)
+                    if ratio < 0.55:
+                        continue
                 else:
                     inter_y = max(
                         0.0,
@@ -366,8 +520,8 @@ class VisionModuleV3(VisionModuleV1):
                         - max(src.bbox.x_min, dst.bbox.x_min),
                     )
                     ratio = (inter_y * inter_x) / max(1e-6, dst.bbox.area)
-                if ratio < 0.25:
-                    continue
+                    if ratio < 0.25:
+                        continue
                 if float(src.confidence) < float(dst.confidence):
                     continue
                 dst.attributes["occluded"] = True

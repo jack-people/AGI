@@ -37,11 +37,13 @@
        预期：clean 与 occluded 的 accepted 为 true，unstable 的 accepted 为 false。
        PowerShell 里 curl 是 Invoke-WebRequest 的别名，命令行请用 curl.exe，或：
         Invoke-RestMethod http://127.0.0.1:8765/predict?preset=clean
-    6. 第四阶段开放词汇示例（仍只需 numpy）：
+    6. 第四阶段：
         浏览器页面点击「看杯子和书」，或访问 http://127.0.0.1:8765/open_demo
-        预期摘要里有「杯子在书左侧」，accepted 为 true。
-        外部检测框走 POST /recognize_open ，JSON 里带 queries 和 detections。
-        可选 OWL-ViT 后端见 New_Model/prototype/requirements-stage4-optional.txt ，不安装不影响现有服务。
+        预期摘要里有「杯子在书左侧」，accepted 为 true。这一步只用 numpy。
+        真实照片：安装 New_Model/prototype/requirements-stage4-optional.txt（含 torchvision）后重启服务。
+        在页面填写英文词（例如 cup, book），选择照片，再点「按文字查找」。
+        OWL-ViT 出框，SAM 2 描边界。查询留空时仍是原来的色块识别。
+        机械臂仿真这一步先不接。
 
 其他脚本：
     1. 三阶段训练并写出权重：

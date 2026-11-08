@@ -2,6 +2,31 @@
 
 下一代模型按两条线来做：**并行**，以及**从视觉开始的模块化**。感知模块只负责把原始信号翻译成同一张场景图，关系推理和自验证不跟某一个视觉实现绑在一起。
 
+## 模块化在哪里
+
+模块之间只认一种接口。`PerceptionModule.encode_to_scene_graph`（`New_Model/prototype/modules/base.py`）把本模态的原始输入写成 `EntityNode` 和 `RelationEdge`。`ParallelRelationalCore` 和 `RCVSSelfVerifier` 只读这张图，不读像素，也不知道框是色块规则算的还是 OWL-ViT 给的。
+
+插拔发生在模态槽位上。`ModuleRegistry`（`registry.py`）按 `vision`、`proprioception` 这类槽位保存当前模块。`NextGenModelEngine.upgrade_module` 替换槽位里的实现，下游推理代码不动。三版视觉都挂在 `vision` 槽：
+
+- `VisionModuleV1`：颜色、边缘、空间三路直接在原图像素上取实体。
+- `VisionModuleV2`：同一输出协议上增加 3×3 中值滤波和遮挡补全。遮挡场景因此能从 V1 的失败变成通过，测试在 `test_modular_hot_upgrade_v1_to_v2_on_occlusion_and_noise`。
+- `VisionModuleV3`：检测器插件交出类别和框，SAM 2 再补掩膜，仍然写成同一张场景图。`test_stage4_open_vocab_hotswap_keeps_reasoner` 检查从 V2 热升级到 V3 之后，原来的「杯子在书左侧」查询仍然由同一套推理器回答。
+
+新感官走同一个注册口。`engine.register_module` 把本体感知挂到 `proprioception` 槽。`perceive_parallel` 把各模态的图做并集，`bind_cross_modal_relations` 按距离补上 `near_to`。夹爪和红色矩形能出现在同一张图里，是因为它们都是实体，不是因为推理器认识机械臂。
+
+训练也按模块拆开。`trainer.py` 的第一阶段只对齐视觉投影，第二、三阶段才动关系注意力和分支路由。视觉升级时不必把推理权重一并推倒。
+
+## 并行在哪里
+
+并行分四层，都在一次 `engine.run` 里发生。
+
+1. **一条感官内部并行。** `VisionModuleV1.encode_to_scene_graph` 用线程池同时跑颜色分割、边缘梯度和空间网格。三路结果回来之后才拼成实体。
+2. **多种感官同时编码。** `NextGenModelEngine.perceive_parallel` 按已注册的模态各开一个任务，例如视觉和本体感知一起算，算完再合并。
+3. **整张图一起传关系。** `ParallelRelationalCore.parallel_relational_attention` 用关系偏置矩阵让所有实体在同一轮里交换信息，推理深度不随实体个数逐个往后排。
+4. **四条假设同时推演，再同时自检。** `rollout_hypotheses` 默认拉起四条策略不同的分支：`strict_high_margin`（余量至少 0.05）、`occlusion_compensated`（允许被遮挡物体）、`transitive_relational`（两跳传递）、`counterfactual_boundary`（临界边界）。`RCVSSelfVerifier.verify_group_parallel` 同时检查这四条，再用 `compute_grpo_advantages` 做组内相对排序。选中的是奖励最高且约束和误差界都过的那一条。`benchmark.py` 里 G=4 相对单分支的实测加速大约是 3.34 倍。
+
+所以模块化决定「谁可以换」，并行决定「一次查询里有哪些计算一起跑」。换视觉模块不会拆掉这四条分支；增加一条感官也不会改分支策略的名字。
+
 ## 项目结构
 
 系统分成四层。上一层只消费下一层的 `StructuredSceneGraph`，不读取像素，也不关心检测器是色块规则还是 OWL-ViT。

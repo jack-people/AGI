@@ -31,7 +31,7 @@ class PerceptionModule(ABC):
 
 class ProprioceptionModule(PerceptionModule):
     """
-    扩展感官示例：机械臂/触觉本体感知模块 (对接仓库中的 `机械臂` 方向)。
+    扩展感官示例：机械臂/触觉本体感知模块。
     用于验证架构的多模态模块化扩展能力：无需修改视觉或核心推理代码，
     即可将机械臂末端与视觉场景中的物体融合到同一张关系图中。
     """

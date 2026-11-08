@@ -4,9 +4,8 @@
 运行方式：
     python3 -m New_Model.prototype.trainer
 
-把 `想法记录`（从模仿到理解、数据->结构化数据、GRPO 组相对策略优化）、
-`方式一`（经验回放防遗忘、持续学习闭环）与 `方案一`（RCVS 自验证奖励）
-真正落地为可训练、可保存权重、可量化提升的训练管线。
+把“先模仿再理解”、结构化场景图、GRPO 组相对优势、经验回放和 RCVS 自验证奖励
+落成可训练、可保存权重、可量化的训练管线。
 
 三阶段训练闭环：
 - 阶段 I  (Stage 1 - 视觉结构化编码对齐):
@@ -486,7 +485,7 @@ class PMVTrainer:
         logs: List[Dict[str, float]] = []
 
         for ep in range(1, epochs + 1):
-            # 按照 `方式一` 的持续学习经验回放比例混合训练批次
+            # 困难样本与清晰回放样本混合，避免路由只记住新场景
             replay_subset = [
                 replay_clean[i]
                 for i in rng.choice(len(replay_clean), size=20, replace=False)

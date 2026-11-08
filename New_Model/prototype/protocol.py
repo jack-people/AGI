@@ -149,7 +149,7 @@ class StructuredSceneGraph:
 
 @dataclass
 class QueryConstraint:
-    """问题需求与验证约束定义（对应方案一 RCVS）。"""
+    """问题需求与验证约束。RCVS 用它检查属性和关系是否成立。"""
     goal: str
     target_attributes: Dict[str, Any] = field(default_factory=dict)
     required_relations: List[Tuple[str, Dict[str, Any]]] = field(default_factory=list)

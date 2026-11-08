@@ -409,8 +409,10 @@ class VisionModuleV1(PerceptionModule):
                         )
                     )
 
-                # 形状一致性关系
-                if src.attributes.get("shape") == dst.attributes.get("shape"):
+                # 形状一致性关系。没有形状标签的开放词汇节点不参与这项比较。
+                src_shape = src.attributes.get("shape")
+                dst_shape = dst.attributes.get("shape")
+                if src_shape and dst_shape and src_shape == dst_shape:
                     edges.append(
                         RelationEdge(
                             source_id=src.entity_id,

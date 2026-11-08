@@ -12,12 +12,21 @@ import unittest
 import numpy as np
 
 from New_Model.prototype.engine import NextGenModelEngine
+from New_Model.prototype.modules.arm import PlanarArmModule, planar_gripper_pose
 from New_Model.prototype.modules.base import ProprioceptionModule
+from New_Model.prototype.modules.continual import ReplayBuffer
 from New_Model.prototype.modules.vision import (
     SceneObjectSpec,
     VisionModuleV1,
     VisionModuleV2,
     VisualSceneBuilder,
+)
+from New_Model.prototype.modules.vision_v3 import (
+    Detection,
+    OwlVitDetector,
+    RecordedDetector,
+    VisionModuleV3,
+    build_cup_book_demo,
 )
 from New_Model.prototype.protocol import QueryConstraint, VerificationStatus
 from New_Model.prototype.trainer import TrainablePMVWeights, run_full_training_pipeline
@@ -177,6 +186,137 @@ class TestNextGenModelArchitecture(unittest.TestCase):
         pink = [node for node in sg.nodes if node.attributes["color"] == "pink"]
         self.assertEqual(len(pink), 1)
         self.assertEqual(pink[0].attributes["shape"], "rectangle")
+
+    def test_stage4_open_vocab_hotswap_keeps_reasoner(self) -> None:
+        """第四阶段：换成开放词汇视觉后，原关系推理和自验证不用改。"""
+        image, detections = build_cup_book_demo()
+        engine = NextGenModelEngine(vision_module=VisionModuleV2())
+        upgraded = VisionModuleV3(detector=RecordedDetector(detections))
+        message = engine.upgrade_module("vision", upgraded)
+        self.assertIn("VisionModule@2.0.0 -> VisionModule@3.0.0", message)
+
+        result = engine.run(
+            {"vision": {"image": image, "detections": detections, "queries": ["杯子", "书"]}},
+            QueryConstraint(
+                goal="找到书左侧的杯子",
+                target_attributes={"category": "杯子"},
+                required_relations=[("left_of", {"category": "书"})],
+                perturbation_radius=0.02,
+            ),
+            simulated_work_steps=64,
+        )
+        self.assertEqual(result["verification_report"].status, VerificationStatus.PASS)
+        categories = [
+            node.attributes["category"] for node in result["scene_graph"].nodes
+        ]
+        self.assertEqual(categories.count("杯子"), 1)
+        self.assertEqual(categories.count("书"), 1)
+
+        pixel_detector = RecordedDetector(
+            [Detection("person", 0.9, 8, 8, 40, 30)]
+        )
+        graph = VisionModuleV3(detector=pixel_detector, queries=["person"]).encode_to_scene_graph(
+            np.zeros((64, 64, 3))
+        )
+        self.assertEqual(len(graph.nodes), 1)
+        self.assertLess(graph.nodes[0].bbox.y_max, 1.5)
+        self.assertIn("person", graph.nodes[0].attributes["category"])
+
+    def test_stage4_planar_arm_and_hard_example_replay(self) -> None:
+        """关节角定位夹爪；严格分支失手、其他分支改对的样本进入回放池。"""
+        gripper_y, gripper_x = planar_gripper_pose(0.80, 0.10, 0.30, 0.25, -1.1, 0.2)
+        image = self.builder.render(
+            [
+                SceneObjectSpec(
+                    "red_box",
+                    "red",
+                    "rectangle",
+                    gripper_y - 0.06,
+                    gripper_x - 0.06,
+                    gripper_y + 0.06,
+                    gripper_x + 0.06,
+                )
+            ]
+        )
+        engine = NextGenModelEngine(vision_module=VisionModuleV2())
+        engine.register_module(PlanarArmModule())
+        arm_result = engine.run(
+            {
+                "vision": image,
+                "proprioception": {
+                    "base_y": 0.80,
+                    "base_x": 0.10,
+                    "length_1": 0.30,
+                    "length_2": 0.25,
+                    "shoulder": -1.1,
+                    "elbow": 0.2,
+                    "aperture": 0.08,
+                    "force_newton": 1.5,
+                },
+            },
+            QueryConstraint(
+                goal="查找关节臂夹爪附近的红色矩形",
+                target_attributes={"color": "red", "shape": "rectangle"},
+                required_relations=[("near_to", {"category": "actuator"})],
+            ),
+            simulated_work_steps=64,
+        )
+        self.assertEqual(arm_result["verification_report"].status, VerificationStatus.PASS)
+
+        wide = [
+            Detection("甲", 0.95, 0.30, 0.15, 0.50, 0.30),
+            Detection("乙", 0.95, 0.30, 0.55, 0.50, 0.70),
+        ]
+        blank = np.zeros((64, 64, 3), dtype=np.float64)
+        buffer = ReplayBuffer()
+        wide_result = NextGenModelEngine(
+            vision_module=VisionModuleV3(detector=RecordedDetector(wide))
+        ).run(
+            {"vision": {"image": blank, "detections": wide}},
+            QueryConstraint(
+                goal="甲在乙的左侧",
+                target_attributes={"category": "甲"},
+                required_relations=[("left_of", {"category": "乙"})],
+                perturbation_radius=0.02,
+            ),
+            simulated_work_steps=64,
+            replay_buffer=buffer,
+        )
+        self.assertEqual(wide_result["verification_report"].status, VerificationStatus.PASS)
+        self.assertEqual(buffer.records, [])
+
+        # 中心距 0.045：关系边存在，但严格分支要求余量至少 0.05。
+        tight = [
+            Detection("甲", 0.95, 0.30, 0.370, 0.50, 0.430),
+            Detection("乙", 0.95, 0.30, 0.420, 0.50, 0.470),
+        ]
+        buffer_hit = ReplayBuffer()
+        hit = NextGenModelEngine(
+            vision_module=VisionModuleV3(detector=RecordedDetector(tight))
+        ).run(
+            {"vision": {"image": blank, "detections": tight}},
+            QueryConstraint(
+                goal="甲在乙的左侧，间距很小",
+                target_attributes={"category": "甲"},
+                required_relations=[("left_of", {"category": "乙"})],
+                perturbation_radius=0.02,
+            ),
+            simulated_work_steps=64,
+            replay_buffer=buffer_hit,
+        )
+        self.assertEqual(hit["verification_report"].status, VerificationStatus.PASS)
+        self.assertNotEqual(
+            hit["verification_report"].selected_hypothesis.strategy_name,
+            "strict_high_margin",
+        )
+        self.assertEqual(len(buffer_hit.records), 1)
+        self.assertEqual(buffer_hit.records[0]["selected_matched"][0][:3], "vis")
+
+    def test_owl_backend_reports_missing_install(self) -> None:
+        detector = OwlVitDetector()
+        with self.assertRaises(RuntimeError) as caught:
+            detector.detect(np.zeros((16, 16, 3)), ["cup"])
+        self.assertIn("VisionModuleV3", str(caught.exception))
 
     def test_three_stage_training_pipeline_and_checkpoint(self) -> None:
         """测试点 5：三阶段训练管线 (视觉对齐 -> SFT 模仿 -> GRPO+RCVS 理解) 收敛并生成权重成果。"""

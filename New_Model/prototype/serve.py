@@ -28,11 +28,12 @@ import argparse
 import base64
 import json
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 from urllib.parse import parse_qs, urlparse
 
 import numpy as np
 
+from .engine import NextGenModelEngine
 from .evaluate_checkpoint import CKPT_PATH, infer_with_weights
 from .modules.vision import (
     COLOR_LABELS,
@@ -41,7 +42,14 @@ from .modules.vision import (
     VisionModuleV2,
     VisualSceneBuilder,
 )
-from .protocol import QueryConstraint
+from .modules.vision_v3 import (
+    Detection,
+    OwlVitDetector,
+    RecordedDetector,
+    VisionModuleV3,
+    build_cup_book_demo,
+)
+from .protocol import QueryConstraint, StructuredSceneGraph, VerificationStatus
 from .trainer import TrainablePMVWeights
 
 
@@ -124,6 +132,9 @@ RELATION_SUFFIX = {
 
 
 def _node_label(attributes: Dict[str, Any]) -> str:
+    category = str(attributes.get("category", ""))
+    if category and category != "actuator":
+        return category
     color = str(attributes.get("color", ""))
     shape = str(attributes.get("shape", ""))
     return f"{COLOR_ZH.get(color, color)}{SHAPE_ZH.get(shape, shape)}"
@@ -173,55 +184,140 @@ class InferenceApp:
         return result
 
     def recognize(self, image: np.ndarray) -> Dict[str, Any]:
-        """对一张用户提供的 RGB 图像做视觉识别，返回物体、形状和空间关系。"""
+        """对一张用户提供的 RGB 图像做色块识别，返回颜色、形状和空间关系。"""
         scene = self.vision.encode_to_scene_graph(np.asarray(image, dtype=np.float64))
-        entities = []
-        for node in scene.nodes:
-            item = node.to_dict()
-            color = str(node.attributes.get("color", ""))
-            shape = str(node.attributes.get("shape", ""))
-            item["label"] = f"{COLOR_ZH.get(color, color)}{SHAPE_ZH.get(shape, shape)}"
-            entities.append(item)
-        relations = []
-        for edge in scene.edges:
-            if edge.relation_type not in RELATION_ZH:
-                continue
-            source = scene.get_node(edge.source_id)
-            target = scene.get_node(edge.target_id)
-            if source is None or target is None:
-                continue
-            source_label = _node_label(source.attributes)
-            target_label = _node_label(target.attributes)
-            suffix = RELATION_SUFFIX[edge.relation_type]
-            sentence = f"{source_label}{RELATION_ZH[edge.relation_type]}{target_label}{suffix}"
-            relations.append({**edge.to_dict(), "sentence": sentence})
-        if not entities:
-            summary = (
+        payload = _describe_scene(scene, image.shape[:2])
+        payload["vocabulary"] = {
+            "colors": list(COLOR_ZH.values()),
+            "shapes": list(SHAPE_ZH.values()),
+        }
+        if payload["entity_count"] == 0:
+            payload["summary"] = (
                 "没有识别到色块。当前视觉模块识别红、橙、黄、绿、青、蓝、紫、粉、白、灰、棕、黑，"
                 "以及矩形、圆形、三角形、菱形。物体需要和画面边缘的背景颜色明显不同。"
             )
-        else:
-            names = "、".join(item["label"] for item in entities)
-            relation_text = "；".join(
-                item["sentence"]
-                for item in relations
-                if item["relation"] in ("left_of", "above", "occludes")
+        return payload
+
+    def open_demo(self) -> Dict[str, Any]:
+        """第四阶段示例：杯子在书的左侧。检测框接入后，原推理器直接回答。"""
+        image, detections = build_cup_book_demo()
+        return self.recognize_open(
+            image,
+            queries=["杯子", "书"],
+            detections=detections,
+            check_relation=True,
+        )
+
+    def recognize_open(
+        self,
+        image: np.ndarray,
+        queries: Optional[list] = None,
+        detections: Optional[list] = None,
+        check_relation: bool = False,
+    ) -> Dict[str, Any]:
+        """用开放词汇检测结果构建场景图。没有检测框时才尝试加载 OWL-ViT。"""
+        query_list = [str(item) for item in (queries or [])]
+        parsed = [_detection_from_payload(item) for item in (detections or [])]
+        if parsed:
+            module = VisionModuleV3(
+                detector=RecordedDetector(parsed),
+                queries=query_list,
             )
-            summary = f"识别到 {len(entities)} 个物体：{names}。"
-            if relation_text:
-                summary += relation_text + "。"
-        return {
-            "summary": summary,
-            "image_size": [int(image.shape[0]), int(image.shape[1])],
-            "entity_count": len(entities),
-            "entities": entities,
-            "relations": relations,
-            "source_modules": list(scene.source_modules),
-            "vocabulary": {
-                "colors": list(COLOR_ZH.values()),
-                "shapes": list(SHAPE_ZH.values()),
-            },
-        }
+            raw: Dict[str, Any] = {
+                "image": image,
+                "queries": query_list,
+                "detections": parsed,
+            }
+        else:
+            module = VisionModuleV3(detector=OwlVitDetector(), queries=query_list)
+            raw = {"image": image, "queries": query_list}
+        scene = module.encode_to_scene_graph(raw)
+        payload = _describe_scene(scene, image.shape[:2])
+        payload["stage"] = 4
+        payload["queries"] = query_list
+        if payload["entity_count"] == 0:
+            payload["summary"] = (
+                "没有识别到给出的类别。可以传入 detections 检测框，"
+                "或安装 torch、transformers、pillow 后让 OWL-ViT 按文字查询。"
+            )
+        if check_relation and payload["entity_count"] >= 2:
+            engine = NextGenModelEngine(vision_module=module, num_branches=4)
+            checked = engine.run(
+                {"vision": raw},
+                QueryConstraint(
+                    goal="杯子在书的左侧",
+                    target_attributes={"category": "杯子"},
+                    required_relations=[("left_of", {"category": "书"})],
+                    perturbation_radius=0.02,
+                ),
+                simulated_work_steps=64,
+            )
+            accepted = (
+                checked["verification_report"].status == VerificationStatus.PASS
+            )
+            payload["accepted"] = accepted
+            payload["goal"] = "杯子在书的左侧"
+            if accepted:
+                payload["summary"] += "关系结论：接受。"
+        return payload
+
+
+def _detection_from_payload(item: Any) -> Detection:
+    if isinstance(item, Detection):
+        return item
+    box = item.get("bbox", item)
+    return Detection(
+        category=str(item["category"]),
+        score=float(item.get("score", 1.0)),
+        y_min=float(box["y_min"]),
+        x_min=float(box["x_min"]),
+        y_max=float(box["y_max"]),
+        x_max=float(box["x_max"]),
+        attributes=dict(item.get("attributes") or {}),
+    )
+
+
+def _describe_scene(scene: StructuredSceneGraph, image_size: tuple) -> Dict[str, Any]:
+    entities = []
+    for node in scene.nodes:
+        item = node.to_dict()
+        item["label"] = _node_label(node.attributes)
+        entities.append(item)
+    relations = []
+    for edge in scene.edges:
+        if edge.relation_type not in RELATION_ZH:
+            continue
+        source = scene.get_node(edge.source_id)
+        target = scene.get_node(edge.target_id)
+        if source is None or target is None:
+            continue
+        sentence = (
+            f"{_node_label(source.attributes)}"
+            f"{RELATION_ZH[edge.relation_type]}"
+            f"{_node_label(target.attributes)}"
+            f"{RELATION_SUFFIX[edge.relation_type]}"
+        )
+        relations.append({**edge.to_dict(), "sentence": sentence})
+    if entities:
+        names = "、".join(item["label"] for item in entities)
+        relation_text = "；".join(
+            item["sentence"]
+            for item in relations
+            if item["relation"] in ("left_of", "above", "occludes")
+        )
+        summary = f"识别到 {len(entities)} 个物体：{names}。"
+        if relation_text:
+            summary += relation_text + "。"
+    else:
+        summary = "没有识别到物体。"
+    return {
+        "summary": summary,
+        "image_size": [int(image_size[0]), int(image_size[1])],
+        "entity_count": len(entities),
+        "entities": entities,
+        "relations": relations,
+        "source_modules": list(scene.source_modules),
+    }
 
 
 def png_bytes(image: np.ndarray) -> bytes:
@@ -264,9 +360,17 @@ def self_check(checkpoint: str) -> None:
         )
         if not result["matches_expectation"]:
             failed.append(name)
+    open_demo = app.open_demo()
+    open_ok = open_demo.get("accepted") is True and "杯子" in open_demo["summary"]
+    print(
+        f"  [{'PASS' if open_ok else 'FAIL'}] open_demo    "
+        f"accepted={open_demo.get('accepted')} summary={open_demo['summary']}"
+    )
+    if not open_ok:
+        failed.append("open_demo")
     if failed:
         raise SystemExit(f"部署冒烟未通过: {failed}")
-    print("部署冒烟通过：清晰场景接受，遮挡场景接受，临界场景拒绝。")
+    print("部署冒烟通过：清晰场景接受，遮挡场景接受，临界场景拒绝，开放词汇示例接受。")
 
 
 PAGE = """<!DOCTYPE html>
@@ -289,6 +393,9 @@ PAGE = """<!DOCTYPE html>
     <input id="file" type="file" accept="image/*">
     <button id="example" type="button">用内置示例图</button>
   </p>
+  <h2>第四阶段：开放词汇</h2>
+  <p>检测器给出类别和位置之后，原来的关系推理直接使用。下面这张示例图里，杯子在书的左侧。上传的普通照片仍然走上面的色块识别；要把 SAM 或 Grounding DINO 的框送进来，请 POST /recognize_open 并带上 detections。</p>
+  <p><button id="open-demo" type="button">看杯子和书</button></p>
   <canvas id="view" width="320" height="320"></canvas>
   <p id="summary">还没有图片。</p>
   <ul id="entities"></ul>
@@ -392,6 +499,20 @@ PAGE = """<!DOCTYPE html>
       const blob = await response.blob();
       await recognizeFile(new File([blob], "example.png", { type: "image/png" }));
     });
+    document.getElementById("open-demo").addEventListener("click", async () => {
+      summary.textContent = "识别中…";
+      const [imageResponse, resultResponse] = await Promise.all([
+        fetch("/open_demo.png"),
+        fetch("/open_demo")
+      ]);
+      const blob = await imageResponse.blob();
+      const result = await resultResponse.json();
+      const image = new Image();
+      image.src = URL.createObjectURL(blob);
+      await image.decode();
+      drawResult(image, result);
+      URL.revokeObjectURL(image.src);
+    });
   </script>
 </body>
 </html>
@@ -422,6 +543,13 @@ def make_handler(app: InferenceApp):
             if parsed.path == "/example.png":
                 image = app.presets["clean"]["image"]
                 self._send_bytes(200, png_bytes(image), "image/png")
+                return
+            if parsed.path == "/open_demo.png":
+                image, _detections = build_cup_book_demo()
+                self._send_bytes(200, png_bytes(image), "image/png")
+                return
+            if parsed.path == "/open_demo":
+                self._send(200, app.open_demo())
                 return
             if parsed.path == "/predict":
                 preset = parse_qs(parsed.query).get("preset", ["clean"])[0]
@@ -457,8 +585,24 @@ def make_handler(app: InferenceApp):
                 except (KeyError, ValueError) as exc:
                     self._send(400, {"error": str(exc)})
                 return
+            if path == "/recognize_open":
+                try:
+                    image = decode_uploaded_image(payload)
+                    result = app.recognize_open(
+                        image,
+                        queries=payload.get("queries") or [],
+                        detections=payload.get("detections") or [],
+                        check_relation=bool(payload.get("check_relation")),
+                    )
+                    self._send(200, result)
+                except (KeyError, ValueError, RuntimeError) as exc:
+                    self._send(400, {"error": str(exc)})
+                return
             if path != "/predict":
-                self._send(404, {"error": "仅支持 POST /predict 或 POST /recognize"})
+                self._send(
+                    404,
+                    {"error": "仅支持 POST /predict、POST /recognize 或 POST /recognize_open"},
+                )
                 return
             try:
                 preset = str(payload.get("preset", "clean"))

@@ -13,6 +13,7 @@ from typing import Any, Dict, Optional
 import numpy as np
 
 from .modules.base import PerceptionModule
+from .modules.continual import ReplayBuffer
 from .modules.parallel_core import ParallelRelationalCore
 from .modules.verifier import RCVSSelfVerifier
 from .modules.vision import VisionModuleV1
@@ -90,6 +91,7 @@ class NextGenModelEngine:
         query: QueryConstraint,
         parallel: bool = True,
         simulated_work_steps: int = 1200,
+        replay_buffer: Optional[ReplayBuffer] = None,
     ) -> Dict[str, Any]:
         """
         执行完整闭环：
@@ -110,6 +112,8 @@ class NextGenModelEngine:
             scene_graph=scene_graph,
             query=query,
         )
+        if replay_buffer is not None:
+            replay_buffer.observe(query, report)
         total_ms = (time.perf_counter() - t0) * 1000.0
 
         return {

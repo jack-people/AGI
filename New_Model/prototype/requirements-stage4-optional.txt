@@ -1,0 +1,4 @@
+# 第四阶段可选开放词汇后端。默认服务只需要 numpy，不要把下面三行装进现有环境，除非要启用 OwlVitDetector。
+torch
+transformers
+pillow

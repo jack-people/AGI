@@ -113,7 +113,7 @@ class NextGenModelEngine:
             query=query,
         )
         if replay_buffer is not None:
-            replay_buffer.observe(query, report)
+            replay_buffer.observe(query, report, scene_graph)
         total_ms = (time.perf_counter() - t0) * 1000.0
 
         return {

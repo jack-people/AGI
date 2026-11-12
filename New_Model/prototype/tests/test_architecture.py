@@ -30,7 +30,12 @@ from New_Model.prototype.modules.vision_v3 import (
     build_cup_book_demo,
 )
 from New_Model.prototype.protocol import QueryConstraint, VerificationStatus
-from New_Model.prototype.trainer import TrainablePMVWeights, run_full_training_pipeline
+from New_Model.prototype.evaluate_checkpoint import CKPT_PATH
+from New_Model.prototype.trainer import (
+    TrainablePMVWeights,
+    run_full_training_pipeline,
+    run_incremental_update,
+)
 
 
 class TestNextGenModelArchitecture(unittest.TestCase):
@@ -327,6 +332,50 @@ class TestNextGenModelArchitecture(unittest.TestCase):
         refiner = Sam2MaskRefiner()
         self.assertEqual(refiner.refine(np.zeros((8, 8, 3)), []), [])
         self.assertIsNone(refiner._model)
+
+    def test_incremental_grpo_keeps_clean_accuracy(self) -> None:
+        """回放记录能还原场景图；增量 GRPO 守住清晰场景，且不改写原权重。"""
+        import tempfile
+        from pathlib import Path
+
+        from New_Model.prototype.serve import InferenceApp, harvest_correction_examples
+
+        base_bytes = CKPT_PATH.read_bytes()
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            app = InferenceApp(str(CKPT_PATH), replay_path=str(root / "live.jsonl"))
+            clean = app.predict("clean")
+            app.predict("occluded")
+            self.assertFalse(clean["replay_recorded"])
+            self.assertGreaterEqual(clean["replay_records"], 0)
+
+            seed = root / "seed.jsonl"
+            buffer = ReplayBuffer(str(seed))
+            added = harvest_correction_examples(buffer)
+            self.assertGreaterEqual(added, 1)
+            self.assertIn("scene_graph", buffer.records[0])
+            self.assertGreaterEqual(len(buffer.records[0]["scene_graph"]["nodes"]), 1)
+
+            output = root / "pmv_incremental_weights.npz"
+            report = run_incremental_update(
+                base_checkpoint=CKPT_PATH,
+                replay_path=seed,
+                output_checkpoint=output,
+                report_path=root / "incremental_report.json",
+                epochs=2,
+                lr=0.05,
+                harvest_if_empty=False,
+            )
+            self.assertGreaterEqual(report["replay_samples_used"], 1)
+            self.assertTrue(report["accepted"])
+            self.assertGreaterEqual(
+                report["after"]["clean_acc"], report["before"]["clean_acc"]
+            )
+            self.assertEqual(report["after"]["false_accept_rate"], 0.0)
+            self.assertTrue(output.exists())
+            reloaded = ReplayBuffer(str(seed))
+            self.assertEqual(len(reloaded.records), len(buffer.records))
+        self.assertEqual(CKPT_PATH.read_bytes(), base_bytes)
 
     def test_three_stage_training_pipeline_and_checkpoint(self) -> None:
         """测试点 5：三阶段训练管线 (视觉对齐 -> SFT 模仿 -> GRPO+RCVS 理解) 收敛并生成权重成果。"""

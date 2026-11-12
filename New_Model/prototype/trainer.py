@@ -21,6 +21,7 @@
 
 from __future__ import annotations
 
+import argparse
 from dataclasses import dataclass, field
 import json
 import math
@@ -31,6 +32,7 @@ from typing import Any, Dict, List, Tuple
 import numpy as np
 
 from .benchmark import generate_benchmark_suite
+from .modules.continual import ReplayBuffer, scene_graph_from_snapshot
 from .modules.vision import VisionModuleV2
 from .protocol import QueryConstraint, StructuredSceneGraph, VerificationStatus
 
@@ -110,14 +112,30 @@ class TrainablePMVWeights:
         data = np.load(path)
         return cls(
             embedding_dim=int(data["embedding_dim"][0]),
-            w_vis_proj=data["w_vis_proj"],
-            b_vis_proj=data["b_vis_proj"],
-            w_q=data["w_q"],
-            w_k=data["w_k"],
-            w_v=data["w_v"],
-            w_match=data["w_match"],
-            policy_logits=data["policy_logits"],
-            branch_margin_thresholds=data["branch_margin_thresholds"],
+            w_vis_proj=np.array(data["w_vis_proj"], copy=True),
+            b_vis_proj=np.array(data["b_vis_proj"], copy=True),
+            w_q=np.array(data["w_q"], copy=True),
+            w_k=np.array(data["w_k"], copy=True),
+            w_v=np.array(data["w_v"], copy=True),
+            w_match=np.array(data["w_match"], copy=True),
+            policy_logits=np.array(data["policy_logits"], copy=True),
+            branch_margin_thresholds=np.array(
+                data["branch_margin_thresholds"], copy=True
+            ),
+        )
+
+    def clone(self) -> "TrainablePMVWeights":
+        """复制一份权重，增量更新若拉低清晰场景准确率就退回这一份。"""
+        return TrainablePMVWeights(
+            embedding_dim=self.embedding_dim,
+            w_vis_proj=np.array(self.w_vis_proj, copy=True),
+            b_vis_proj=np.array(self.b_vis_proj, copy=True),
+            w_q=np.array(self.w_q, copy=True),
+            w_k=np.array(self.w_k, copy=True),
+            w_v=np.array(self.w_v, copy=True),
+            w_match=np.array(self.w_match, copy=True),
+            policy_logits=np.array(self.policy_logits, copy=True),
+            branch_margin_thresholds=np.array(self.branch_margin_thresholds, copy=True),
         )
 
 
@@ -248,6 +266,14 @@ class PMVTrainer:
             "stage2_sft_imitation": [],
             "stage3_grpo_self_verified": [],
         }
+
+    @classmethod
+    def from_checkpoint(cls, path: Path) -> "PMVTrainer":
+        """加载已有权重，准备在上面做增量更新。"""
+        weights = TrainablePMVWeights.load(path)
+        trainer = cls(embedding_dim=weights.embedding_dim)
+        trainer.weights = weights
+        return trainer
 
     def prepare_cached_graphs(
         self, dataset: List[Dict[str, Any]]
@@ -544,6 +570,67 @@ class PMVTrainer:
         self.history["stage3_grpo_self_verified"] = logs
         return logs
 
+    def train_incremental_grpo(
+        self,
+        replay_samples: List[Dict[str, Any]],
+        clean_samples: List[Dict[str, Any]],
+        epochs: int = 8,
+        lr: float = 0.05,
+        clean_mix: int = 20,
+    ) -> List[Dict[str, float]]:
+        """
+        用部署后记下来的困难样本再走一轮 GRPO。
+        每一轮都混入清晰样本，让路由在记住新纠正的同时守住原来的清晰场景。
+        """
+        if not replay_samples or not clean_samples:
+            return []
+        rng = np.random.default_rng(2026)
+        logs: List[Dict[str, float]] = []
+        mix_count = min(clean_mix, len(clean_samples))
+
+        for ep in range(1, epochs + 1):
+            replay_subset = [
+                clean_samples[int(index)]
+                for index in rng.choice(len(clean_samples), size=mix_count, replace=False)
+            ]
+            batch = list(replay_samples) + replay_subset
+            rng.shuffle(batch)
+            ep_rewards: List[float] = []
+            for sample in batch:
+                _, _, node_probs = self.forward_node_scores(
+                    sample["scene_graph"], sample["query_vec"]
+                )
+                rewards = np.zeros(4, dtype=np.float64)
+                for branch_id in range(4):
+                    reward, _, _ = self._evaluate_branch_reward(
+                        branch_id, sample, node_probs
+                    )
+                    rewards[branch_id] = reward
+                mean_r = float(np.mean(rewards))
+                std_r = float(np.std(rewards))
+                if std_r > 1e-6:
+                    advantages = (rewards - mean_r) / (std_r + 1e-6)
+                else:
+                    advantages = np.zeros(4, dtype=np.float64)
+                ctx_feat = sample["ctx_feat"]
+                logits_g = ctx_feat @ self.weights.policy_logits
+                probs_g = softmax(logits_g)
+                ep_rewards.append(float(np.sum(probs_g * rewards)))
+                baseline_adv = float(np.sum(probs_g * advantages))
+                grad_logits_g = probs_g * (advantages - baseline_adv)
+                self.weights.policy_logits += lr * np.outer(ctx_feat, grad_logits_g)
+            logs.append(
+                {
+                    "epoch": float(ep),
+                    "mean_expected_reward": round(float(np.mean(ep_rewards)), 4),
+                    "replay_samples": float(len(replay_samples)),
+                    "clean_mix": float(mix_count),
+                }
+            )
+
+        self.history["incremental_grpo"] = logs
+        return logs
+
     def evaluate_all(self, prepared_data: List[Dict[str, Any]]) -> Dict[str, float]:
         """评估当前模型权重在全部 120 个测试任务上的表现。"""
         clean_ok, clean_tot = 0, 0
@@ -596,6 +683,129 @@ class PMVTrainer:
                 100.0 * false_accept / max(1, unstable_tot), 2
             ),
         }
+
+
+def samples_from_replay(
+    records: List[Dict[str, Any]], embedding_dim: int
+) -> List[Dict[str, Any]]:
+    """把回放 jsonl 还原成和三阶段训练相同的样本结构。"""
+    samples: List[Dict[str, Any]] = []
+    for record in records:
+        snapshot = record.get("scene_graph")
+        if not snapshot or not snapshot.get("nodes"):
+            continue
+        scene = scene_graph_from_snapshot(snapshot)
+        if int(scene.nodes[0].embedding.shape[0]) != embedding_dim:
+            continue
+        relations = [
+            (str(item[0]), dict(item[1]))
+            for item in record.get("required_relations", [])
+        ]
+        query = QueryConstraint(
+            goal=str(record.get("goal", "")),
+            target_attributes=dict(record.get("target_attributes") or {}),
+            required_relations=relations,
+            error_tolerance=float(record.get("error_tolerance", 0.15)),
+            perturbation_radius=float(record.get("perturbation_radius", 0.03)),
+        )
+        target_idx = -1
+        selected = list(record.get("selected_matched") or [])
+        gt_color = str(record.get("gt_color") or "")
+        if selected:
+            for idx, node in enumerate(scene.nodes):
+                if node.entity_id == selected[0]:
+                    target_idx = idx
+                    if not gt_color:
+                        gt_color = str(node.attributes.get("color", ""))
+                    break
+        samples.append(
+            {
+                "id": f"replay_{len(samples)}",
+                "split": "replay",
+                "scene_graph": scene,
+                "query": query,
+                "query_vec": encode_query_vector(query, scene, embedding_dim),
+                "ctx_feat": extract_scene_context_features(scene, query),
+                "gt_color": gt_color,
+                "gt_stable": True,
+                "target_idx": target_idx,
+                "selected_strategy": record.get("selected_strategy"),
+            }
+        )
+    return samples
+
+
+def _metrics_held(before: Dict[str, float], after: Dict[str, float]) -> bool:
+    return (
+        after["clean_acc"] >= before["clean_acc"]
+        and after["occ_acc"] >= before["occ_acc"]
+        and after["boundary_acc"] >= before["boundary_acc"]
+        and after["overall_acc"] >= before["overall_acc"]
+        and after["false_accept_rate"] <= before["false_accept_rate"]
+    )
+
+
+def _repo_relative(path: Path) -> str:
+    root = Path(__file__).resolve().parents[2]
+    try:
+        return str(path.resolve().relative_to(root))
+    except ValueError:
+        return str(path)
+
+
+def run_incremental_update(
+    base_checkpoint: Path,
+    replay_path: Path,
+    output_checkpoint: Path,
+    report_path: Path,
+    epochs: int = 8,
+    lr: float = 0.05,
+    harvest_if_empty: bool = True,
+) -> Dict[str, Any]:
+    """
+    从已有权重出发，读回放记录，混入 120 题里的清晰样本，再跑一小轮 GRPO。
+    清晰、遮挡、临界和总准确率都没有下降时，才把新权重写到单独的文件。
+    """
+    buffer = ReplayBuffer(str(replay_path))
+    trainer = PMVTrainer.from_checkpoint(base_checkpoint)
+    samples = samples_from_replay(buffer.records, trainer.embedding_dim)
+    if not samples and harvest_if_empty:
+        from .serve import harvest_correction_examples
+
+        harvest_correction_examples(buffer)
+        samples = samples_from_replay(buffer.records, trainer.embedding_dim)
+    prepared = trainer.prepare_cached_graphs(generate_benchmark_suite())
+    before = trainer.evaluate_all(prepared)
+    clean_samples = [item for item in prepared if item["split"] == "clean"]
+    history = trainer.train_incremental_grpo(
+        samples, clean_samples, epochs=epochs, lr=lr
+    )
+    after = trainer.evaluate_all(prepared) if history else dict(before)
+    accepted = bool(history) and _metrics_held(before, after)
+    if not accepted:
+        trainer.weights = TrainablePMVWeights.load(base_checkpoint)
+    else:
+        trainer.weights.save(output_checkpoint)
+
+    report = {
+        "base_checkpoint": _repo_relative(base_checkpoint),
+        "output_checkpoint": _repo_relative(output_checkpoint) if accepted else "",
+        "replay_path": _repo_relative(replay_path),
+        "replay_records": len(buffer.records),
+        "replay_samples_used": len(samples),
+        "epochs": epochs if history else 0,
+        "learning_rate": lr,
+        "accepted": accepted,
+        "clean_accuracy_held": after["clean_acc"] >= before["clean_acc"],
+        "before": before,
+        "after": after,
+        "history": history,
+    }
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report_path.write_text(
+        json.dumps(report, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+    )
+    return report
 
 
 def run_full_training_pipeline() -> Dict[str, Any]:
@@ -653,6 +863,56 @@ def run_full_training_pipeline() -> Dict[str, Any]:
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser(description="PMV 三阶段训练，或从回放记录做增量 GRPO")
+    parser.add_argument(
+        "--incremental",
+        action="store_true",
+        help="读取回放记录，混入清晰样本，更新一份新权重",
+    )
+    parser.add_argument(
+        "--checkpoint",
+        default="",
+        help="增量更新的起点。默认是 checkpoints/pmv_trained_weights.npz",
+    )
+    parser.add_argument(
+        "--replay",
+        default="",
+        help="回放 jsonl。默认是 checkpoints/replay_seed.jsonl；空文件会先收集预设纠正",
+    )
+    parser.add_argument("--epochs", type=int, default=8)
+    parser.add_argument("--lr", type=float, default=0.05)
+    args = parser.parse_args()
+
+    ckpt_dir = Path(__file__).resolve().parent / "checkpoints"
+    if args.incremental:
+        base = Path(args.checkpoint) if args.checkpoint else ckpt_dir / "pmv_trained_weights.npz"
+        replay = Path(args.replay) if args.replay else ckpt_dir / "replay_seed.jsonl"
+        output = ckpt_dir / "pmv_incremental_weights.npz"
+        report_path = ckpt_dir / "incremental_report.json"
+        print("=" * 78)
+        print("  启动 PMV 增量 GRPO：回放困难样本 + 清晰样本")
+        print("=" * 78)
+        report = run_incremental_update(
+            base_checkpoint=base,
+            replay_path=replay,
+            output_checkpoint=output,
+            report_path=report_path,
+            epochs=args.epochs,
+            lr=args.lr,
+        )
+        print(
+            f"  回放样本 {report['replay_samples_used']} 条，"
+            f"清晰准确率 {report['before']['clean_acc']:.2f}% -> {report['after']['clean_acc']:.2f}%，"
+            f"总准确率 {report['before']['overall_acc']:.2f}% -> {report['after']['overall_acc']:.2f}%"
+        )
+        if report["accepted"]:
+            print(f"  新权重已写入: {report['output_checkpoint']}")
+        else:
+            print("  这轮没有提高或守住原指标，原权重保持不变，未写入新文件。")
+        print(f"  报告: {report_path}")
+        print("=" * 78)
+        return
+
     print("=" * 78)
     print("  启动 PMV 下一代并行模块化模型 —— 三阶段训练流水线 (Alignment -> SFT -> GRPO)")
     print("=" * 78)

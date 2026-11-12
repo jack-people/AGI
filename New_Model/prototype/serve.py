@@ -28,6 +28,7 @@ import argparse
 import base64
 import json
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 from typing import Any, Dict, Optional
 from urllib.parse import parse_qs, urlparse
 
@@ -35,6 +36,7 @@ import numpy as np
 
 from .engine import NextGenModelEngine
 from .evaluate_checkpoint import CKPT_PATH, infer_with_weights
+from .modules.continual import ReplayBuffer
 from .modules.vision import (
     COLOR_LABELS,
     SHAPE_LABELS,
@@ -118,6 +120,41 @@ def build_presets() -> Dict[str, Dict[str, Any]]:
     }
 
 
+def harvest_correction_examples(
+    replay: ReplayBuffer, simulated_work_steps: int = 64
+) -> int:
+    """把预设场景和一条已知的窄间距纠正写进回放池。已有的记录不会重复追加。"""
+    before = len(replay.records)
+    engine = NextGenModelEngine(vision_module=VisionModuleV2(), num_branches=4)
+    for spec in build_presets().values():
+        engine.run(
+            {"vision": spec["image"]},
+            spec["query"],
+            simulated_work_steps=simulated_work_steps,
+            replay_buffer=replay,
+        )
+    tight = [
+        Detection("甲", 0.95, 0.30, 0.370, 0.50, 0.430),
+        Detection("乙", 0.95, 0.30, 0.420, 0.50, 0.470),
+    ]
+    blank = np.zeros((64, 64, 3), dtype=np.float64)
+    NextGenModelEngine(
+        vision_module=VisionModuleV3(detector=RecordedDetector(tight)),
+        num_branches=4,
+    ).run(
+        {"vision": {"image": blank, "detections": tight}},
+        QueryConstraint(
+            goal="甲在乙的左侧，间距很小",
+            target_attributes={"category": "甲"},
+            required_relations=[("left_of", {"category": "乙"})],
+            perturbation_radius=0.02,
+        ),
+        simulated_work_steps=simulated_work_steps,
+        replay_buffer=replay,
+    )
+    return len(replay.records) - before
+
+
 COLOR_ZH = COLOR_LABELS
 SHAPE_ZH = SHAPE_LABELS
 RELATION_ZH = {
@@ -158,13 +195,22 @@ def decode_uploaded_image(payload: Dict[str, Any]) -> np.ndarray:
 
 
 class InferenceApp:
-    def __init__(self, checkpoint: str) -> None:
+    def __init__(self, checkpoint: str, replay_path: Optional[str] = None) -> None:
         self.weights = TrainablePMVWeights.load(checkpoint)
         self.vision = VisionModuleV2(embedding_dim=self.weights.embedding_dim)
         self.presets = build_presets()
         self.checkpoint = checkpoint
         self.open_detector = OwlVitDetector()
         self.mask_refiner = Sam2MaskRefiner()
+        if replay_path is None:
+            replay_path = str(
+                Path(checkpoint).resolve().parent / "replay_live.jsonl"
+            )
+        self.replay = ReplayBuffer(replay_path)
+        self._symbolic = NextGenModelEngine(
+            vision_module=VisionModuleV2(embedding_dim=self.weights.embedding_dim),
+            num_branches=4,
+        )
 
     def health(self) -> Dict[str, Any]:
         return {
@@ -172,7 +218,20 @@ class InferenceApp:
             "checkpoint": self.checkpoint,
             "embedding_dim": self.weights.embedding_dim,
             "presets": list(self.presets.keys()),
+            "replay_records": len(self.replay.records),
+            "replay_path": str(self.replay.path) if self.replay.path else "",
         }
+
+    def _remember_correction(self, image: np.ndarray, query: QueryConstraint) -> bool:
+        """用四条符号分支再看一遍。严格分支失手、其他分支改对时写入回放池。"""
+        before = len(self.replay.records)
+        self._symbolic.run(
+            {"vision": image},
+            query,
+            simulated_work_steps=64,
+            replay_buffer=self.replay,
+        )
+        return len(self.replay.records) > before
 
     def predict(self, preset: str) -> Dict[str, Any]:
         if preset not in self.presets:
@@ -184,6 +243,8 @@ class InferenceApp:
         result["preset"] = preset
         result["expect_accepted"] = spec["expect_accepted"]
         result["matches_expectation"] = result["accepted"] == spec["expect_accepted"]
+        result["replay_recorded"] = self._remember_correction(spec["image"], spec["query"])
+        result["replay_records"] = len(self.replay.records)
         return result
 
     def recognize(self, image: np.ndarray) -> Dict[str, Any]:
@@ -267,6 +328,7 @@ class InferenceApp:
                     perturbation_radius=0.02,
                 ),
                 simulated_work_steps=64,
+                replay_buffer=self.replay,
             )
             accepted = (
                 checked["verification_report"].status == VerificationStatus.PASS
@@ -727,17 +789,23 @@ def main() -> None:
         help="训练权重路径，默认使用 prototype/checkpoints/pmv_trained_weights.npz",
     )
     parser.add_argument(
+        "--replay",
+        default="",
+        help="困难样本 jsonl。默认写到权重旁边的 replay_live.jsonl",
+    )
+    parser.add_argument(
         "--self-check",
         action="store_true",
         help="不启动端口，直接对三条预设场景做一次推理冒烟",
     )
     args = parser.parse_args()
+    replay_path = args.replay or None
 
     if args.self_check:
         self_check(args.checkpoint)
         return
 
-    app = InferenceApp(args.checkpoint)
+    app = InferenceApp(args.checkpoint, replay_path=replay_path)
     server = ThreadingHTTPServer((args.host, args.port), make_handler(app))
     print(f"PMV 推理服务已启动: http://{args.host}:{args.port}")
     print(f"权重: {args.checkpoint}")

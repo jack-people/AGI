@@ -83,7 +83,7 @@ New_Model/
     └── data/
 ```
 
-`arm.py` 里有平面两连杆正运动学，机械臂仿真先不继续。`continual.py` 只负责记下「严格分支没答对、其他分支改对」的查询，按周增量训练还没接上。
+`arm.py` 里有平面两连杆正运动学，机械臂仿真先不继续。`continual.py` 在推理时把「严格分支没答对、其他分支改对」的查询连同场景图写入回放池。`python3 -m New_Model.prototype.trainer --incremental` 读取这些记录，和 120 题里的清晰样本混在一起再跑一轮 GRPO。清晰、遮挡、临界和总准确率都没有下降时，新权重写到 `checkpoints/pmv_incremental_weights.npz`，原来的 `pmv_trained_weights.npz` 保持不变。
 
 ## 运行
 
@@ -107,6 +107,7 @@ python3 -m New_Model.prototype.serve --host 0.0.0.0 --port 8765
 
 ```bash
 python3 -m New_Model.prototype.trainer
+python3 -m New_Model.prototype.trainer --incremental
 python3 -m New_Model.prototype.evaluate_checkpoint
 python3 -m New_Model.prototype.demo
 python3 -m New_Model.prototype.benchmark

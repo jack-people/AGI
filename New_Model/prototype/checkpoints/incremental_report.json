@@ -1,0 +1,75 @@
+{
+  "base_checkpoint": "New_Model/prototype/checkpoints/pmv_trained_weights.npz",
+  "output_checkpoint": "New_Model/prototype/checkpoints/pmv_incremental_weights.npz",
+  "replay_path": "New_Model/prototype/checkpoints/replay_seed.jsonl",
+  "replay_records": 1,
+  "replay_samples_used": 1,
+  "epochs": 8,
+  "learning_rate": 0.05,
+  "accepted": true,
+  "clean_accuracy_held": true,
+  "before": {
+    "clean_acc": 100.0,
+    "occ_acc": 100.0,
+    "boundary_acc": 100.0,
+    "overall_acc": 100.0,
+    "false_accept_rate": 0.0
+  },
+  "after": {
+    "clean_acc": 100.0,
+    "occ_acc": 100.0,
+    "boundary_acc": 100.0,
+    "overall_acc": 100.0,
+    "false_accept_rate": 0.0
+  },
+  "history": [
+    {
+      "epoch": 1.0,
+      "mean_expected_reward": 0.9919,
+      "replay_samples": 1.0,
+      "clean_mix": 20.0
+    },
+    {
+      "epoch": 2.0,
+      "mean_expected_reward": 0.9919,
+      "replay_samples": 1.0,
+      "clean_mix": 20.0
+    },
+    {
+      "epoch": 3.0,
+      "mean_expected_reward": 0.9918,
+      "replay_samples": 1.0,
+      "clean_mix": 20.0
+    },
+    {
+      "epoch": 4.0,
+      "mean_expected_reward": 0.9918,
+      "replay_samples": 1.0,
+      "clean_mix": 20.0
+    },
+    {
+      "epoch": 5.0,
+      "mean_expected_reward": 0.9919,
+      "replay_samples": 1.0,
+      "clean_mix": 20.0
+    },
+    {
+      "epoch": 6.0,
+      "mean_expected_reward": 0.9919,
+      "replay_samples": 1.0,
+      "clean_mix": 20.0
+    },
+    {
+      "epoch": 7.0,
+      "mean_expected_reward": 0.9919,
+      "replay_samples": 1.0,
+      "clean_mix": 20.0
+    },
+    {
+      "epoch": 8.0,
+      "mean_expected_reward": 0.9919,
+      "replay_samples": 1.0,
+      "clean_mix": 20.0
+    }
+  ]
+}

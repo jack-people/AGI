@@ -2,3 +2,4 @@ __pycache__/
 *.pyc
 .env
 New_Model/prototype/checkpoints/replay_live.jsonl
+New_Model/prototype/data/visual_genome/

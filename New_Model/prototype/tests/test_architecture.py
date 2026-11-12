@@ -31,6 +31,12 @@ from New_Model.prototype.modules.vision_v3 import (
 )
 from New_Model.prototype.protocol import QueryConstraint, VerificationStatus
 from New_Model.prototype.evaluate_checkpoint import CKPT_PATH
+from New_Model.prototype.scene_graph_eval import (
+    canonical_spatial,
+    cases_from_image,
+    evaluate_cases,
+    iter_json_array,
+)
 from New_Model.prototype.trainer import (
     TrainablePMVWeights,
     run_full_training_pipeline,
@@ -332,6 +338,96 @@ class TestNextGenModelArchitecture(unittest.TestCase):
         refiner = Sam2MaskRefiner()
         self.assertEqual(refiner.refine(np.zeros((8, 8, 3)), []), [])
         self.assertIsNone(refiner._model)
+
+    def test_visual_genome_directional_relations_use_open_vocab_reasoner(self) -> None:
+        """真实场景图里的方向关系走开放词汇接口；语义谓词不计入。"""
+        self.assertEqual(canonical_spatial("ON TOP OF"), "above")
+        self.assertEqual(canonical_spatial("to left of"), "left_of")
+        self.assertIsNone(canonical_spatial("wearing"))
+        record = {
+            "image_id": 7,
+            "relationships": [
+                {
+                    "predicate": "to left of",
+                    "subject": {
+                        "name": "cup",
+                        "object_id": 1,
+                        "x": 10,
+                        "y": 20,
+                        "w": 30,
+                        "h": 40,
+                    },
+                    "object": {
+                        "name": "book",
+                        "object_id": 2,
+                        "x": 120,
+                        "y": 20,
+                        "w": 40,
+                        "h": 40,
+                    },
+                },
+                {
+                    "predicate": "wearing",
+                    "subject": {
+                        "name": "man",
+                        "object_id": 3,
+                        "x": 0,
+                        "y": 0,
+                        "w": 20,
+                        "h": 40,
+                    },
+                    "object": {
+                        "name": "hat",
+                        "object_id": 4,
+                        "x": 0,
+                        "y": 0,
+                        "w": 10,
+                        "h": 10,
+                    },
+                },
+            ],
+        }
+        cases, skipped = cases_from_image(record, 200, 100)
+        self.assertEqual(skipped, 1)
+        self.assertEqual(len(cases), 1)
+        self.assertEqual(cases[0]["relation"], "left_of")
+        agreed = evaluate_cases(cases)
+        self.assertEqual(agreed["geometry_agreed"], 1)
+        self.assertEqual(agreed["reasoning_accepted"], 1)
+
+        reversed_record = {
+            "image_id": 8,
+            "relationships": [
+                {
+                    "predicate": "left of",
+                    "subject": {
+                        "name": "cup",
+                        "object_id": 1,
+                        "x": 140,
+                        "y": 20,
+                        "w": 30,
+                        "h": 40,
+                    },
+                    "object": {
+                        "name": "book",
+                        "object_id": 2,
+                        "x": 10,
+                        "y": 20,
+                        "w": 40,
+                        "h": 40,
+                    },
+                }
+            ],
+        }
+        reversed_cases, _ = cases_from_image(reversed_record, 200, 100)
+        disagreed = evaluate_cases(reversed_cases)
+        self.assertEqual(disagreed["geometry_agreed"], 0)
+        self.assertEqual(disagreed["reasoning_accepted"], 0)
+
+        import io
+
+        stream = io.StringIO('[{"image_id": 1, "relationships": []}, {"image_id": 2}]')
+        self.assertEqual([item["image_id"] for item in iter_json_array(stream)], [1, 2])
 
     def test_incremental_grpo_keeps_clean_accuracy(self) -> None:
         """回放记录能还原场景图；增量 GRPO 守住清晰场景，且不改写原权重。"""

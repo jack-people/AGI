@@ -1,0 +1,141 @@
+{
+  "source": "Visual Genome relationships (jn12/VisualGenome mirror of the 1.4 release)",
+  "license": "CC-BY-4.0",
+  "citation": "Krishna et al., Visual Genome: Connecting Language and Vision Using Crowdsourced Dense Image Annotations, IJCV 2017.",
+  "path": "VisionModuleV3 recorded boxes -> parallel branches -> RCVS",
+  "perturbation_radius": 0.02,
+  "per_relation_cap": 200,
+  "images_seen": 14684,
+  "images_used": 371,
+  "spatial_seen_before_cap": 11285,
+  "nonspatial_skipped_while_scanning": 298700,
+  "collected": {
+    "left_of": 200,
+    "right_of": 200,
+    "above": 200,
+    "below": 200
+  },
+  "spatial_relations": 800,
+  "geometry_agreed": 608,
+  "reasoning_accepted": 608,
+  "geometry_agreement": 76.0,
+  "reasoning_accuracy": 76.0,
+  "accepted_without_geometry": 0,
+  "misses": {
+    "opposite_direction": 118,
+    "center_gap_below_0.04": 74
+  },
+  "by_relation": {
+    "left_of": {
+      "count": 200,
+      "geometry_agreed": 151,
+      "reasoning_accepted": 151,
+      "geometry_agreement": 75.5,
+      "reasoning_accuracy": 75.5
+    },
+    "right_of": {
+      "count": 200,
+      "geometry_agreed": 159,
+      "reasoning_accepted": 159,
+      "geometry_agreement": 79.5,
+      "reasoning_accuracy": 79.5
+    },
+    "above": {
+      "count": 200,
+      "geometry_agreed": 140,
+      "reasoning_accepted": 140,
+      "geometry_agreement": 70.0,
+      "reasoning_accuracy": 70.0
+    },
+    "below": {
+      "count": 200,
+      "geometry_agreed": 158,
+      "reasoning_accepted": 158,
+      "geometry_agreement": 79.0,
+      "reasoning_accuracy": 79.0
+    }
+  },
+  "geometry_disagreements": [
+    {
+      "image_id": 254,
+      "relation": "left_of",
+      "subject": "door",
+      "object": "door",
+      "status": "UNKNOWN",
+      "strategy": "strict_high_margin",
+      "center_gap": -0.6708,
+      "miss": "opposite_direction"
+    },
+    {
+      "image_id": 358,
+      "relation": "left_of",
+      "subject": "computer tower",
+      "object": "desk",
+      "status": "UNKNOWN",
+      "strategy": "strict_high_margin",
+      "center_gap": -0.2725,
+      "miss": "opposite_direction"
+    },
+    {
+      "image_id": 415,
+      "relation": "left_of",
+      "subject": "man",
+      "object": "woman",
+      "status": "UNKNOWN",
+      "strategy": "strict_high_margin",
+      "center_gap": -0.0078,
+      "miss": "opposite_direction"
+    },
+    {
+      "image_id": 492,
+      "relation": "left_of",
+      "subject": "night stand",
+      "object": "bed",
+      "status": "UNKNOWN",
+      "strategy": "strict_high_margin",
+      "center_gap": 0.0269,
+      "miss": "center_gap_below_0.04"
+    },
+    {
+      "image_id": 507,
+      "relation": "left_of",
+      "subject": "chair",
+      "object": "chair",
+      "status": "UNKNOWN",
+      "strategy": "strict_high_margin",
+      "center_gap": -0.3312,
+      "miss": "opposite_direction"
+    },
+    {
+      "image_id": 1065,
+      "relation": "left_of",
+      "subject": "sheet",
+      "object": "bed",
+      "status": "UNKNOWN",
+      "strategy": "strict_high_margin",
+      "center_gap": -0.0012,
+      "miss": "opposite_direction"
+    },
+    {
+      "image_id": 1587,
+      "relation": "left_of",
+      "subject": "post",
+      "object": "curb",
+      "status": "UNKNOWN",
+      "strategy": "strict_high_margin",
+      "center_gap": -0.0906,
+      "miss": "opposite_direction"
+    },
+    {
+      "image_id": 2155,
+      "relation": "left_of",
+      "subject": "dresser",
+      "object": "bed",
+      "status": "UNKNOWN",
+      "strategy": "strict_high_margin",
+      "center_gap": -0.2569,
+      "miss": "opposite_direction"
+    }
+  ],
+  "agreed_but_rejected": []
+}

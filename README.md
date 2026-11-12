@@ -85,6 +85,8 @@ New_Model/
 
 `arm.py` 里有平面两连杆正运动学，机械臂仿真先不继续。`continual.py` 在推理时把「严格分支没答对、其他分支改对」的查询连同场景图写入回放池。`python3 -m New_Model.prototype.trainer --incremental` 读取这些记录，和 120 题里的清晰样本混在一起再跑一轮 GRPO。清晰、遮挡、临界和总准确率都没有下降时，新权重写到 `checkpoints/pmv_incremental_weights.npz`，原来的 `pmv_trained_weights.npz` 保持不变。
 
+`scene_graph_eval.py` 用 Visual Genome 的真实关系标注检查开放词汇之后的关系推理。标注框走 `VisionModuleV3` 的同一条接口，再交给原来的并行分支和 RCVS。计入分数的是方向关系：left of、right of、above、on top of、under。wearing、on、has 这类语义关系不在当前词表里，扫描时跳过。每种方向关系取 200 条，共 800 条：几何关系和推理结论一致的是 76.00%。方向对得上、中心距达到画面 4% 的样本全部被接受。没对上的 192 条里，118 条是标注方向和框中心相反，74 条是两个中心靠得太近。报告在 `checkpoints/visual_genome_relation_report.json`。原始标注缓存在 `data/visual_genome/`，不进仓库。
+
 ## 运行
 
 在仓库根目录执行。色块识别、预设推理和单元测试只需要 Python 3 和 NumPy。
@@ -108,6 +110,7 @@ python3 -m New_Model.prototype.serve --host 0.0.0.0 --port 8765
 ```bash
 python3 -m New_Model.prototype.trainer
 python3 -m New_Model.prototype.trainer --incremental
+python3 -m New_Model.prototype.scene_graph_eval
 python3 -m New_Model.prototype.evaluate_checkpoint
 python3 -m New_Model.prototype.demo
 python3 -m New_Model.prototype.benchmark

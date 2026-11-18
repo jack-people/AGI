@@ -18,13 +18,13 @@ import json
 import zipfile
 from collections import Counter
 from pathlib import Path
-from typing import Any, Dict, Iterable, Iterator, List, Optional, Tuple
+from typing import Any, Dict, Iterable, Iterator, List, Optional, Sequence, Tuple
 from urllib.request import urlretrieve
 
 import numpy as np
 
 from .engine import NextGenModelEngine
-from .modules.vision_v3 import Detection, VisionModuleV3
+from .modules.vision_v3 import Detection, OwlVitDetector, VisionModuleV3
 from .protocol import QueryConstraint, VerificationStatus
 
 
@@ -36,6 +36,21 @@ SEMANTIC_REPORT_PATH = (
     Path(__file__).resolve().parent
     / "checkpoints"
     / "visual_genome_semantic_report.json"
+)
+DETECTOR_REPORT_PATH = (
+    Path(__file__).resolve().parent
+    / "checkpoints"
+    / "visual_genome_detector_box_report.json"
+)
+DETECTOR_RELATIONS = (
+    "left_of",
+    "right_of",
+    "above",
+    "below",
+    "on",
+    "wearing",
+    "in",
+    "has",
 )
 RELATION_URL = (
     "https://huggingface.co/datasets/jn12/VisualGenome/resolve/main/relationships.json.zip"
@@ -422,7 +437,13 @@ def evaluate_cases(
         total += 1
         bucket = by_relation.setdefault(
             case["relation"],
-            {"count": 0, "geometry_agreed": 0, "reasoning_accepted": 0},
+            {
+                "count": 0,
+                "geometry_agreed": 0,
+                "reasoning_accepted": 0,
+                "agreed_and_accepted": 0,
+                "misses": Counter(),
+            },
         )
         bucket["count"] += 1
         outcome = _score_case(engine, blank, case, perturbation_radius)
@@ -432,10 +453,13 @@ def evaluate_cases(
         if outcome["reasoning_accepted"]:
             reasoning_accepted += 1
             bucket["reasoning_accepted"] += 1
+        if outcome["geometry_agreed"] and outcome["reasoning_accepted"]:
+            bucket["agreed_and_accepted"] += 1
         if outcome["reasoning_accepted"] and not outcome["geometry_agreed"]:
             accepted_without_geometry += 1
         if not outcome["geometry_agreed"]:
             miss_counts[outcome["miss"]] += 1
+            bucket["misses"][outcome["miss"]] += 1
         example = {
             "image_id": case["image_id"],
             "relation": case["relation"],
@@ -462,7 +486,11 @@ def evaluate_cases(
     for name, bucket in by_relation.items():
         count = bucket["count"]
         per_relation[name] = {
-            **bucket,
+            "count": bucket["count"],
+            "geometry_agreed": bucket["geometry_agreed"],
+            "reasoning_accepted": bucket["reasoning_accepted"],
+            "agreed_and_accepted": bucket["agreed_and_accepted"],
+            "misses": dict(bucket["misses"]),
             "geometry_agreement": round(100.0 * bucket["geometry_agreed"] / max(1, count), 2),
             "reasoning_accuracy": round(
                 100.0 * bucket["reasoning_accepted"] / max(1, count), 2
@@ -567,6 +595,29 @@ def _node_for(graph: Any, object_id: int) -> Any:
     return None
 
 
+def qualify_relations(measured: Dict[str, Any]) -> Dict[str, Any]:
+    """语义合格线。on 只在底边贴住上半部时计入接受率，宽松标注单独列出。"""
+    qualified: Dict[str, Any] = {}
+    for name, bucket in measured["by_relation"].items():
+        misses = bucket.get("misses") or {}
+        item = {
+            "annotated": bucket["count"],
+            "reasoning_accuracy": bucket["reasoning_accuracy"],
+            "rule_not_met": int(misses.get("rule_not_met", 0)),
+            "reversed_direction": int(misses.get("reversed_direction", 0)),
+        }
+        if name == "on":
+            applies = int(bucket["geometry_agreed"])
+            accepted = int(bucket.get("agreed_and_accepted", 0))
+            item["bottom_touches_upper_half"] = applies
+            item["acceptance_when_rule_applies"] = round(
+                100.0 * accepted / max(1, applies), 2
+            )
+            item["loose_scene_annotation"] = int(misses.get("rule_not_met", 0))
+        qualified[name] = item
+    return qualified
+
+
 def run_semantic_check(
     cache_dir: Path = CACHE_DIR,
     per_relation: int = 200,
@@ -577,6 +628,7 @@ def run_semantic_check(
     sizes = load_image_sizes(image_path)
     collected = collect_semantic_cases(relations_path, sizes, per_relation=per_relation)
     measured = evaluate_cases(collected["cases"])
+    qualification = qualify_relations(measured)
     report = {
         "source": "Visual Genome relationships (jn12/VisualGenome mirror of the 1.4 release)",
         "license": "CC-BY-4.0",
@@ -590,6 +642,7 @@ def run_semantic_check(
         "relations_seen_before_cap": collected["spatial_seen"],
         "other_relations_skipped_while_scanning": collected["nonspatial_skipped"],
         "collected": collected["collected"],
+        "qualification": qualification,
         **measured,
     }
     report_path.parent.mkdir(parents=True, exist_ok=True)
@@ -629,6 +682,279 @@ def run_visual_genome_check(
     return report
 
 
+def load_image_records(path: Path) -> Dict[int, Dict[str, Any]]:
+    if path.suffix == ".zip":
+        with zipfile.ZipFile(path) as archive:
+            name = next(item for item in archive.namelist() if item.endswith(".json"))
+            payload = json.loads(archive.read(name))
+    else:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    records = {}
+    for item in payload:
+        records[int(item["image_id"])] = {
+            "width": int(item["width"]),
+            "height": int(item["height"]),
+            "url": str(item.get("url") or ""),
+        }
+    return records
+
+
+def collect_detector_pairs(
+    relations_path: Path,
+    images: Dict[int, Dict[str, Any]],
+    per_relation: int = 4,
+    max_images: int = 16,
+) -> Dict[str, List[Dict[str, Any]]]:
+    """每种关系最多留 per_relation 条，并且只留名字没有重复的一对。"""
+    kept = {name: [] for name in DETECTOR_RELATIONS}
+    images_used = set()
+    seen_pairs = set()
+    seen = 0
+    with _open_relations(relations_path) as handle:
+        for record in iter_json_array(handle):
+            seen += 1
+            image_id = int(record.get("image_id", -1))
+            meta = images.get(image_id)
+            if meta is None or not meta.get("url"):
+                continue
+            if image_id not in images_used and len(images_used) >= max_images:
+                if seen > 40000 or all(len(rows) >= per_relation for rows in kept.values()):
+                    break
+                continue
+            spatial, _skipped = cases_from_image(
+                record, meta["width"], meta["height"], canonical_spatial
+            )
+            semantic, _skipped = cases_from_image(
+                record, meta["width"], meta["height"], canonical_semantic
+            )
+            added = False
+            for case in list(spatial) + list(semantic):
+                relation = case["relation"]
+                if relation not in kept or len(kept[relation]) >= per_relation:
+                    continue
+                if "#" in case["subject_label"] or "#" in case["target_label"]:
+                    continue
+                if case["predicate_subject"] == case["predicate_object"]:
+                    continue
+                pair_key = (
+                    image_id,
+                    relation,
+                    case["predicate_subject"],
+                    case["predicate_object"],
+                )
+                if pair_key in seen_pairs:
+                    continue
+                seen_pairs.add(pair_key)
+                pair = _pair_detections(case)
+                if len(pair) != 2:
+                    continue
+                kept[relation].append({**case, "url": meta["url"], "pair": pair})
+                added = True
+            if added:
+                images_used.add(image_id)
+            if all(len(rows) >= per_relation for rows in kept.values()):
+                break
+            if seen % 20000 == 0:
+                filled = {name: len(rows) for name, rows in kept.items()}
+                print(f"  挑选检测对照样本，已扫描 {seen} 张：{filled}")
+    return kept
+
+
+def _pair_detections(case: Dict[str, Any]) -> List[Detection]:
+    """只留这一对标注框，类别用原始名字，方便和检测器的框对照。"""
+    pair = []
+    for item in case["detections"]:
+        object_id = item.attributes.get("vg_object_id")
+        if object_id == case["subject_id"]:
+            name = case["predicate_subject"]
+        elif object_id == case["target_id"]:
+            name = case["predicate_object"]
+        else:
+            continue
+        pair.append(
+            Detection(
+                name,
+                float(item.score),
+                float(item.y_min),
+                float(item.x_min),
+                float(item.y_max),
+                float(item.x_max),
+                attributes={"vg_name": name, "vg_object_id": object_id},
+            )
+        )
+    return pair
+
+
+def accepts_named_relation(
+    engine: NextGenModelEngine,
+    image: np.ndarray,
+    detections: Sequence[Detection],
+    subject: str,
+    target: str,
+    relation: str,
+) -> bool:
+    """检测框和标注框共用这一问法：主体类别是否通过指定关系连到客体。"""
+    result = engine.run(
+        {"vision": {"image": image, "detections": list(detections), "queries": []}},
+        QueryConstraint(
+            goal=f"{subject} {relation} {target}",
+            target_attributes={"category": subject},
+            required_relations=[(relation, {"category": target})],
+            perturbation_radius=0.02,
+        ),
+        parallel=False,
+        simulated_work_steps=0,
+    )
+    report = result["verification_report"]
+    selected = report.selected_hypothesis
+    if report.status != VerificationStatus.PASS or selected is None:
+        return False
+    graph = result["scene_graph"]
+    for entity_id in selected.matched_entities:
+        node = graph.get_node(entity_id)
+        if node is None or _node_name(node) != subject:
+            continue
+        for edge in graph.find_edges(source_id=entity_id, relation_type=relation):
+            other = graph.get_node(edge.target_id)
+            if other is not None and _node_name(other) == target:
+                return True
+    return False
+
+
+def _node_name(node: Any) -> str:
+    raw = node.attributes.get("vg_name") or node.attributes.get("category") or ""
+    return str(raw).split(" #", 1)[0].strip().lower()
+
+
+def _load_rgb(url: str, dest: Path) -> Optional[np.ndarray]:
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    if not dest.exists() or dest.stat().st_size == 0:
+        try:
+            urlretrieve(url, dest)
+        except Exception:
+            return None
+    try:
+        from PIL import Image
+    except ModuleNotFoundError:
+        return None
+    try:
+        picture = Image.open(dest).convert("RGB")
+    except Exception:
+        return None
+    return np.asarray(picture).astype(np.float64) / 255.0
+
+
+def run_detector_box_check(
+    cache_dir: Path = CACHE_DIR,
+    per_relation: int = 4,
+    max_images: int = 16,
+    report_path: Path = DETECTOR_REPORT_PATH,
+) -> Dict[str, Any]:
+    """同一批关系，分别用标注框和 OWL-ViT 的框问一次。不改写 76% 的方向关系报告。"""
+    relations_path, image_path = ensure_annotations(cache_dir)
+    images = load_image_records(image_path)
+    grouped = collect_detector_pairs(
+        relations_path, images, per_relation=per_relation, max_images=max_images
+    )
+    by_image: Dict[int, List[Dict[str, Any]]] = {}
+    for rows in grouped.values():
+        for case in rows:
+            by_image.setdefault(int(case["image_id"]), []).append(case)
+    module = VisionModuleV3(score_threshold=0.05)
+    engine = NextGenModelEngine(vision_module=module, num_branches=4)
+    detector = OwlVitDetector()
+    totals = {
+        name: {"count": 0, "gt_accepted": 0, "owl_accepted": 0, "owl_found_both": 0}
+        for name in DETECTOR_RELATIONS
+    }
+    examples: List[Dict[str, Any]] = []
+    image_dir = cache_dir / "detector_images"
+    downloaded = 0
+    for image_id, cases in by_image.items():
+        picture = _load_rgb(cases[0]["url"], image_dir / f"{image_id}.jpg")
+        if picture is None:
+            continue
+        downloaded += 1
+        names = []
+        for case in cases:
+            for name in (case["predicate_subject"], case["predicate_object"]):
+                if name not in names:
+                    names.append(name)
+        try:
+            found = detector.detect(picture, names)
+        except RuntimeError as exc:
+            raise SystemExit(str(exc)) from exc
+        for item in found:
+            item.attributes["vg_name"] = item.category
+        found_names = {_node_name_text(item.category) for item in found}
+        for case in cases:
+            relation = case["relation"]
+            subject = case["predicate_subject"]
+            target = case["predicate_object"]
+            gt_ok = accepts_named_relation(
+                engine, picture, case["pair"], subject, target, relation
+            )
+            both = subject in found_names and target in found_names
+            owl_ok = False
+            if both:
+                owl_ok = accepts_named_relation(
+                    engine, picture, found, subject, target, relation
+                )
+            bucket = totals[relation]
+            bucket["count"] += 1
+            bucket["gt_accepted"] += int(gt_ok)
+            bucket["owl_accepted"] += int(owl_ok)
+            bucket["owl_found_both"] += int(both)
+            if len(examples) < 8 and gt_ok != owl_ok:
+                examples.append(
+                    {
+                        "image_id": image_id,
+                        "relation": relation,
+                        "subject": subject,
+                        "object": target,
+                        "gt_accepted": gt_ok,
+                        "owl_accepted": owl_ok,
+                        "owl_found_both": both,
+                    }
+                )
+            print(
+                f"  {relation:<10} {subject} -> {target}  "
+                f"标注 {'接受' if gt_ok else '拒绝'}  "
+                f"检测 {'接受' if owl_ok else '拒绝'}"
+            )
+    compared = {}
+    for name, bucket in totals.items():
+        count = bucket["count"]
+        gt_rate = round(100.0 * bucket["gt_accepted"] / max(1, count), 2)
+        owl_rate = round(100.0 * bucket["owl_accepted"] / max(1, count), 2)
+        compared[name] = {
+            **bucket,
+            "gt_rate": gt_rate,
+            "owl_rate": owl_rate,
+            "rate_drop": round(gt_rate - owl_rate, 2),
+        }
+    report = {
+        "source": "Visual Genome images with OWL-ViT boxes versus annotated boxes",
+        "detector": "google/owlvit-base-patch32",
+        "score_threshold": detector.score_threshold,
+        "images_downloaded": downloaded,
+        "per_relation_cap": per_relation,
+        "max_images": max_images,
+        "note": "这一份只比较检测框和标注框。方向关系 76.00% 的报告没有改。",
+        "by_relation": compared,
+        "examples": examples,
+    }
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report_path.write_text(
+        json.dumps(report, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+    )
+    return report
+
+
+def _node_name_text(name: str) -> str:
+    return " ".join(str(name).lower().split())
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="用 Visual Genome 检查开放词汇后的关系推理")
     parser.add_argument("--cache", default=str(CACHE_DIR))
@@ -639,7 +965,37 @@ def main() -> None:
         action="store_true",
         help="检查 on、wearing、in、has，并另写一份报告",
     )
+    parser.add_argument(
+        "--detector-boxes",
+        action="store_true",
+        help="用 OWL-ViT 的框和标注框对照一小批真实照片",
+    )
+    parser.add_argument("--detector-images", type=int, default=16)
     args = parser.parse_args()
+    if args.detector_boxes:
+        report_path = Path(args.report) if args.report else DETECTOR_REPORT_PATH
+        report = run_detector_box_check(
+            cache_dir=Path(args.cache),
+            per_relation=min(args.per_relation, 4) if args.per_relation == 200 else args.per_relation,
+            max_images=args.detector_images,
+            report_path=report_path,
+        )
+        print("=" * 78)
+        print("  标注框与 OWL-ViT 框对照")
+        print("=" * 78)
+        print(f"  下载图片 {report['images_downloaded']} 张。方向关系 76.00% 的报告没有改。")
+        for name, bucket in report["by_relation"].items():
+            if bucket["count"] == 0:
+                continue
+            print(
+                f"  - {name:<10} n={bucket['count']:<3} "
+                f"标注 {bucket['gt_rate']:>6.2f}%  "
+                f"检测 {bucket['owl_rate']:>6.2f}%  "
+                f"相差 {bucket['rate_drop']:>6.2f}"
+            )
+        print(f"  报告: {report_path}")
+        print("=" * 78)
+        return
     report_path = Path(args.report) if args.report else (
         SEMANTIC_REPORT_PATH if args.semantic else REPORT_PATH
     )
@@ -669,6 +1025,14 @@ def main() -> None:
             f"  - {name:<10} n={bucket['count']:<4} "
             f"几何 {bucket['geometry_agreement']:>6.2f}%  "
             f"推理 {bucket['reasoning_accuracy']:>6.2f}%"
+        )
+    on_line = (report.get("qualification") or {}).get("on")
+    if on_line:
+        print(
+            "  on 合格线：底边贴住 "
+            f"{on_line['bottom_touches_upper_half']} 条，"
+            f"规则适用时接受 {on_line['acceptance_when_rule_applies']:.2f}%；"
+            f"宽松标注 {on_line['loose_scene_annotation']} 条另计为规则不符。"
         )
     print(f"  报告: {report_path}")
     print("=" * 78)

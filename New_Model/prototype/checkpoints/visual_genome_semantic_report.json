@@ -21,6 +21,35 @@
     "in": 200,
     "has": 200
   },
+  "qualification": {
+    "on": {
+      "annotated": 200,
+      "reasoning_accuracy": 8.5,
+      "rule_not_met": 183,
+      "reversed_direction": 0,
+      "bottom_touches_upper_half": 17,
+      "acceptance_when_rule_applies": 100.0,
+      "loose_scene_annotation": 183
+    },
+    "wearing": {
+      "annotated": 200,
+      "reasoning_accuracy": 83.5,
+      "rule_not_met": 33,
+      "reversed_direction": 0
+    },
+    "in": {
+      "annotated": 200,
+      "reasoning_accuracy": 62.5,
+      "rule_not_met": 55,
+      "reversed_direction": 20
+    },
+    "has": {
+      "annotated": 200,
+      "reasoning_accuracy": 74.5,
+      "rule_not_met": 45,
+      "reversed_direction": 6
+    }
+  },
   "spatial_relations": 800,
   "geometry_agreed": 458,
   "reasoning_accepted": 458,
@@ -36,6 +65,10 @@
       "count": 200,
       "geometry_agreed": 17,
       "reasoning_accepted": 17,
+      "agreed_and_accepted": 17,
+      "misses": {
+        "rule_not_met": 183
+      },
       "geometry_agreement": 8.5,
       "reasoning_accuracy": 8.5
     },
@@ -43,6 +76,10 @@
       "count": 200,
       "geometry_agreed": 167,
       "reasoning_accepted": 167,
+      "agreed_and_accepted": 167,
+      "misses": {
+        "rule_not_met": 33
+      },
       "geometry_agreement": 83.5,
       "reasoning_accuracy": 83.5
     },
@@ -50,6 +87,11 @@
       "count": 200,
       "geometry_agreed": 125,
       "reasoning_accepted": 125,
+      "agreed_and_accepted": 125,
+      "misses": {
+        "reversed_direction": 20,
+        "rule_not_met": 55
+      },
       "geometry_agreement": 62.5,
       "reasoning_accuracy": 62.5
     },
@@ -57,6 +99,11 @@
       "count": 200,
       "geometry_agreed": 149,
       "reasoning_accepted": 149,
+      "agreed_and_accepted": 149,
+      "misses": {
+        "rule_not_met": 45,
+        "reversed_direction": 6
+      },
       "geometry_agreement": 74.5,
       "reasoning_accuracy": 74.5
     }

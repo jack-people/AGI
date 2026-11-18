@@ -1,0 +1,157 @@
+{
+  "source": "Visual Genome images with OWL-ViT boxes versus annotated boxes",
+  "detector": "google/owlvit-base-patch32",
+  "score_threshold": 0.1,
+  "images_downloaded": 15,
+  "per_relation_cap": 4,
+  "max_images": 16,
+  "note": "这一份只比较检测框和标注框。方向关系 76.00% 的报告没有改。",
+  "by_relation": {
+    "left_of": {
+      "count": 4,
+      "gt_accepted": 3,
+      "owl_accepted": 1,
+      "owl_found_both": 1,
+      "gt_rate": 75.0,
+      "owl_rate": 25.0,
+      "rate_drop": 50.0
+    },
+    "right_of": {
+      "count": 4,
+      "gt_accepted": 4,
+      "owl_accepted": 2,
+      "owl_found_both": 3,
+      "gt_rate": 100.0,
+      "owl_rate": 50.0,
+      "rate_drop": 50.0
+    },
+    "above": {
+      "count": 4,
+      "gt_accepted": 1,
+      "owl_accepted": 2,
+      "owl_found_both": 2,
+      "gt_rate": 25.0,
+      "owl_rate": 50.0,
+      "rate_drop": -25.0
+    },
+    "below": {
+      "count": 4,
+      "gt_accepted": 4,
+      "owl_accepted": 2,
+      "owl_found_both": 2,
+      "gt_rate": 100.0,
+      "owl_rate": 50.0,
+      "rate_drop": 50.0
+    },
+    "on": {
+      "count": 4,
+      "gt_accepted": 0,
+      "owl_accepted": 0,
+      "owl_found_both": 3,
+      "gt_rate": 0.0,
+      "owl_rate": 0.0,
+      "rate_drop": 0.0
+    },
+    "wearing": {
+      "count": 4,
+      "gt_accepted": 2,
+      "owl_accepted": 2,
+      "owl_found_both": 2,
+      "gt_rate": 50.0,
+      "owl_rate": 50.0,
+      "rate_drop": 0.0
+    },
+    "in": {
+      "count": 4,
+      "gt_accepted": 3,
+      "owl_accepted": 1,
+      "owl_found_both": 2,
+      "gt_rate": 75.0,
+      "owl_rate": 25.0,
+      "rate_drop": 50.0
+    },
+    "has": {
+      "count": 4,
+      "gt_accepted": 4,
+      "owl_accepted": 2,
+      "owl_found_both": 2,
+      "gt_rate": 100.0,
+      "owl_rate": 50.0,
+      "rate_drop": 50.0
+    }
+  },
+  "examples": [
+    {
+      "image_id": 166,
+      "relation": "left_of",
+      "subject": "lamp",
+      "object": "entryway",
+      "gt_accepted": true,
+      "owl_accepted": false,
+      "owl_found_both": false
+    },
+    {
+      "image_id": 210,
+      "relation": "left_of",
+      "subject": "grass",
+      "object": "hill",
+      "gt_accepted": true,
+      "owl_accepted": false,
+      "owl_found_both": false
+    },
+    {
+      "image_id": 247,
+      "relation": "right_of",
+      "subject": "sofa",
+      "object": "table",
+      "gt_accepted": true,
+      "owl_accepted": false,
+      "owl_found_both": true
+    },
+    {
+      "image_id": 885,
+      "relation": "right_of",
+      "subject": "drawers",
+      "object": "desk",
+      "gt_accepted": true,
+      "owl_accepted": false,
+      "owl_found_both": false
+    },
+    {
+      "image_id": 1,
+      "relation": "above",
+      "subject": "parking meter",
+      "object": "street",
+      "gt_accepted": false,
+      "owl_accepted": true,
+      "owl_found_both": true
+    },
+    {
+      "image_id": 8,
+      "relation": "above",
+      "subject": "dish",
+      "object": "cpu",
+      "gt_accepted": true,
+      "owl_accepted": false,
+      "owl_found_both": false
+    },
+    {
+      "image_id": 8,
+      "relation": "above",
+      "subject": "cd",
+      "object": "drawer",
+      "gt_accepted": false,
+      "owl_accepted": true,
+      "owl_found_both": true
+    },
+    {
+      "image_id": 8,
+      "relation": "in",
+      "subject": "cd",
+      "object": "front",
+      "gt_accepted": true,
+      "owl_accepted": false,
+      "owl_found_both": false
+    }
+  ]
+}

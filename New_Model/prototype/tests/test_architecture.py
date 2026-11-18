@@ -32,11 +32,13 @@ from New_Model.prototype.modules.vision_v3 import (
 from New_Model.prototype.protocol import QueryConstraint, VerificationStatus
 from New_Model.prototype.evaluate_checkpoint import CKPT_PATH
 from New_Model.prototype.scene_graph_eval import (
+    accepts_named_relation,
     canonical_semantic,
     canonical_spatial,
     cases_from_image,
     evaluate_cases,
     iter_json_array,
+    qualify_relations,
 )
 from New_Model.prototype.trainer import (
     TrainablePMVWeights,
@@ -339,6 +341,49 @@ class TestNextGenModelArchitecture(unittest.TestCase):
         refiner = Sam2MaskRefiner()
         self.assertEqual(refiner.refine(np.zeros((8, 8, 3)), []), [])
         self.assertIsNone(refiner._model)
+
+    def test_on_qualification_counts_loose_annotations_separately(self) -> None:
+        """on 的合格线只看底边贴住的样本，宽松标注单独列出。"""
+        qualified = qualify_relations(
+            {
+                "by_relation": {
+                    "on": {
+                        "count": 10,
+                        "geometry_agreed": 4,
+                        "reasoning_accepted": 4,
+                        "agreed_and_accepted": 4,
+                        "reasoning_accuracy": 40.0,
+                        "misses": {"rule_not_met": 6},
+                    },
+                    "wearing": {
+                        "count": 10,
+                        "geometry_agreed": 8,
+                        "reasoning_accepted": 8,
+                        "agreed_and_accepted": 8,
+                        "reasoning_accuracy": 80.0,
+                        "misses": {"rule_not_met": 2},
+                    },
+                }
+            }
+        )
+        self.assertEqual(qualified["on"]["acceptance_when_rule_applies"], 100.0)
+        self.assertEqual(qualified["on"]["loose_scene_annotation"], 6)
+        self.assertEqual(qualified["on"]["bottom_touches_upper_half"], 4)
+        self.assertEqual(qualified["wearing"]["reasoning_accuracy"], 80.0)
+        engine = NextGenModelEngine(
+            vision_module=VisionModuleV3(score_threshold=0.05), num_branches=4
+        )
+        image = np.zeros((8, 8, 3), dtype=np.float64)
+        detections = [
+            Detection("cup", 1.0, 0.30, 0.35, 0.48, 0.55, attributes={"vg_name": "cup"}),
+            Detection("table", 1.0, 0.42, 0.20, 0.80, 0.80, attributes={"vg_name": "table"}),
+        ]
+        self.assertTrue(
+            accepts_named_relation(engine, image, detections, "cup", "table", "on")
+        )
+        self.assertFalse(
+            accepts_named_relation(engine, image, detections, "table", "cup", "on")
+        )
 
     def test_semantic_relations_from_boxes_keep_directional_query(self) -> None:
         """on、wearing、in、has 由框和名字写出；左右关系仍然成立。"""

@@ -40,13 +40,13 @@
 
 做到这里就停。机械臂仿真、Grounding DINO、DINOv2、通用对话都不在这个成品里。听觉或机械臂若以后要加，是新感官插进同一张场景图。
 
-已经有的部分留着：三阶段训练、四条并行分支、RCVS、上传识别、增量回放、方向关系 76.00%，以及四种语义关系的第一版规则（wearing 83.50%，in 62.50%，has 74.50%，on 8.50%）。
+已经有的部分留着：三阶段训练、四条并行分支、RCVS、上传识别、增量回放、方向关系 76.00%。语义关系的合格线是：wearing 83.50%，in 62.50%，has 74.50%。`on` 的 200 条标注里，底边贴住上半部的有 17 条，这 17 条全部接受；另外 183 条是「在某个景物上」，单独计为规则不符，不拿来改规则。
 
-剩下按这个顺序做，做完一步再进下一步：
+三步都已完成：
 
 1. **页面显示四种新关系。** 已完成。推理里的 `on`、`wearing`、`in`、`has` 会出现在摘要和关系列表里。页面上「看杯子在桌上」的摘要含有「杯子在桌子上」，「看人戴帽子」的摘要含有「人穿着帽子」。这两项不下载大模型。
-2. **固定语义关系的合格线。** wearing、in、has 保持现在这一档。`on` 只统计「底边贴住上半部」的样本，数据集里「在某个景物上」的标注单独计为规则不符，不再为了抬分改规则。完成时 `--semantic` 按这个口径分列，方向关系复测仍是 76.00%。
-3. **用检测器自己的框再考一次。** 抽一小批真实照片，让 OWL-ViT 出框，再跑同一套关系推理。单独写一份报告，说明检测框相对标准框，方向关系和四种语义关系各差多少。这一步只测量，不改原来的 76.00%。
+2. **固定语义关系的合格线。** 已完成。`--semantic` 的报告里 `qualification.on` 分列了「底边贴住」和「宽松标注」。wearing、in、has 仍是 83.50%、62.50%、74.50%。方向关系复测仍是 76.00%。
+3. **用检测器自己的框再考一次。** 已完成。15 张 Visual Genome 照片、每种关系 4 条，同一问法分别用标注框和 OWL-ViT 的框。标注框接受率相对检测框：left 75% 对 25%，right 100% 对 50%，above 25% 对 50%，below 100% 对 50%，on 都是 0%，wearing 都是 50%，in 75% 对 25%，has 100% 对 50%。这份对照在 `checkpoints/visual_genome_detector_box_report.json`，不改 800 条方向关系的 76.00%。
 
 ## 项目结构
 
@@ -119,7 +119,9 @@ New_Model/
 - `wearing`：人的名字配上衣服或配件的名字，并且衣服框和人的框重叠。
 - `has`：整体框包住部件框。只是挨得近、没有包含时不写。
 
-`python3 -m New_Model.prototype.scene_graph_eval --semantic` 对这四种各取 200 条。接受率是 on 8.50%、wearing 83.50%、in 62.50%、has 74.50%，合计 57.25%。没写上边的 342 条里，316 条是框不满足规则，26 条是标注的主客体方向和框的包含方向相反。`on` 低，是因为标注里的 on 常常只是「在某个景物上」，例如 shade on sidewalk，底边并不贴住对方的上半部。报告在 `checkpoints/visual_genome_semantic_report.json`。原始标注缓存在 `data/visual_genome/`，不进仓库。
+`python3 -m New_Model.prototype.scene_graph_eval --semantic` 对这四种各取 200 条。wearing、in、has 的接受率是 83.50%、62.50%、74.50%。`on` 的 200 条里，底边贴住上半部的 17 条全部接受，其余 183 条按宽松标注另计，不写进这条规则的接受率。报告在 `checkpoints/visual_genome_semantic_report.json`。
+
+`python3 -m New_Model.prototype.scene_graph_eval --detector-boxes` 用 15 张真实照片比较标注框和 OWL-ViT 框。检测框在 left、right、below、in、has 上比标注框少接受约 50 个百分点；above 和 wearing、on 没有更差。报告在 `checkpoints/visual_genome_detector_box_report.json`。原始标注和下载的照片缓存在 `data/visual_genome/`，不进仓库。
 
 ## 运行
 
@@ -147,6 +149,7 @@ python3 -m New_Model.prototype.trainer
 python3 -m New_Model.prototype.trainer --incremental
 python3 -m New_Model.prototype.scene_graph_eval
 python3 -m New_Model.prototype.scene_graph_eval --semantic
+python3 -m New_Model.prototype.scene_graph_eval --detector-boxes
 python3 -m New_Model.prototype.evaluate_checkpoint
 python3 -m New_Model.prototype.demo
 python3 -m New_Model.prototype.benchmark

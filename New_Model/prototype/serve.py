@@ -155,18 +155,59 @@ def harvest_correction_examples(
     return len(replay.records) - before
 
 
+def _support_demo_scene():
+    """杯子放在桌子上。框和画面里的色块对齐。"""
+    cup = SceneObjectSpec("cup", "blue", "circle", 0.30, 0.35, 0.48, 0.55)
+    table = SceneObjectSpec("table", "brown", "rectangle", 0.42, 0.20, 0.80, 0.80)
+    image = VisualSceneBuilder(height=128, width=128).render([table, cup])
+    detections = [
+        Detection("杯子", 0.98, cup.y_min, cup.x_min, cup.y_max, cup.x_max, attributes={"vg_name": "cup"}),
+        Detection("桌子", 0.97, table.y_min, table.x_min, table.y_max, table.x_max, attributes={"vg_name": "table"}),
+    ]
+    return image, detections
+
+
+def _wearing_demo_scene():
+    """帽子落在人的框里。"""
+    person = SceneObjectSpec("person", "orange", "rectangle", 0.20, 0.30, 0.90, 0.60)
+    hat = SceneObjectSpec("hat", "red", "rectangle", 0.18, 0.36, 0.32, 0.54)
+    image = VisualSceneBuilder(height=128, width=128).render([person, hat])
+    detections = [
+        Detection("人", 0.98, person.y_min, person.x_min, person.y_max, person.x_max, attributes={"vg_name": "man"}),
+        Detection("帽子", 0.97, hat.y_min, hat.x_min, hat.y_max, hat.x_max, attributes={"vg_name": "hat"}),
+    ]
+    return image, detections
+
+
 COLOR_ZH = COLOR_LABELS
 SHAPE_ZH = SHAPE_LABELS
 RELATION_ZH = {
     "left_of": "在",
     "above": "在",
     "occludes": "遮挡了",
+    "on": "在",
+    "wearing": "穿着",
+    "in": "在",
+    "has": "有",
 }
 RELATION_SUFFIX = {
     "left_of": "左侧",
     "above": "上方",
     "occludes": "",
+    "on": "上",
+    "wearing": "",
+    "in": "里",
+    "has": "",
 }
+SUMMARY_RELATIONS = (
+    "left_of",
+    "above",
+    "occludes",
+    "on",
+    "wearing",
+    "in",
+    "has",
+)
 
 
 def _node_label(attributes: Dict[str, Any]) -> str:
@@ -270,6 +311,24 @@ class InferenceApp:
             queries=["杯子", "书"],
             detections=detections,
             check_relation=True,
+        )
+
+    def support_demo(self) -> Dict[str, Any]:
+        """杯子底边贴住桌面时，摘要里写出 on。"""
+        image, detections = _support_demo_scene()
+        return self.recognize_open(
+            image,
+            queries=["杯子", "桌子"],
+            detections=detections,
+        )
+
+    def wearing_demo(self) -> Dict[str, Any]:
+        """帽子和人重叠时，摘要里写出 wearing。"""
+        image, detections = _wearing_demo_scene()
+        return self.recognize_open(
+            image,
+            queries=["人", "帽子"],
+            detections=detections,
         )
 
     def recognize_open(
@@ -392,9 +451,9 @@ def _describe_scene(
                 dict.fromkeys(
                     item["sentence"]
                     for item in relations
-                    if item["relation"] in ("left_of", "above", "occludes")
+                    if item["relation"] in SUMMARY_RELATIONS
                 )
-            )[:6]
+            )[:8]
         )
         summary = f"识别到 {len(entities)} 个物体：{names}。"
         if relation_text:
@@ -490,9 +549,28 @@ def self_check(checkpoint: str) -> None:
     )
     if not open_ok:
         failed.append("open_demo")
+    support = app.support_demo()
+    support_ok = "杯子在桌子上" in support["summary"]
+    print(
+        f"  [{'PASS' if support_ok else 'FAIL'}] support_demo "
+        f"summary={support['summary']}"
+    )
+    if not support_ok:
+        failed.append("support_demo")
+    wearing = app.wearing_demo()
+    wearing_ok = "人穿着帽子" in wearing["summary"]
+    print(
+        f"  [{'PASS' if wearing_ok else 'FAIL'}] wearing_demo "
+        f"summary={wearing['summary']}"
+    )
+    if not wearing_ok:
+        failed.append("wearing_demo")
     if failed:
         raise SystemExit(f"部署冒烟未通过: {failed}")
-    print("部署冒烟通过：清晰场景接受，遮挡场景接受，临界场景拒绝，开放词汇示例接受。")
+    print(
+        "部署冒烟通过：清晰场景接受，遮挡场景接受，临界场景拒绝，"
+        "开放词汇示例接受，杯子在桌上，人戴着帽子。"
+    )
 
 
 PAGE = """<!DOCTYPE html>
@@ -516,11 +594,13 @@ PAGE = """<!DOCTYPE html>
     <button id="example" type="button">用内置示例图</button>
   </p>
   <h2>按文字找真实物体</h2>
-  <p>先填写英文词，再选择照片，然后点「按文字查找」。OWL-ViT 负责找框，SAM 2 负责把框收成物体边界，原来的左右和上下关系接着用。查询留空时，选图仍只认颜色和形状。第一次查找会下载权重。SAM 2 还需要 torchvision。</p>
+  <p>先填写英文词，再选择照片，然后点「按文字查找」。OWL-ViT 负责找框，SAM 2 负责把框收成物体边界。框上可以写出左右、上下，以及贴住、包含、穿着和整体含有部件。查询留空时，选图仍只认颜色和形状。第一次查找会下载权重。SAM 2 还需要 torchvision。</p>
   <p>
     <input id="queries" type="text" size="42" placeholder="cup, book">
     <button id="find" type="button">按文字查找</button>
     <button id="open-demo" type="button">看杯子和书</button>
+    <button id="support-demo" type="button">看杯子在桌上</button>
+    <button id="wearing-demo" type="button">看人戴帽子</button>
   </p>
   <canvas id="view" width="320" height="320"></canvas>
   <p id="summary">还没有图片。</p>
@@ -573,7 +653,7 @@ PAGE = """<!DOCTYPE html>
         return item;
       }));
       const shown = (result.relations || []).filter((item) =>
-        ["left_of", "above", "occludes"].includes(item.relation)
+        ["left_of", "above", "occludes", "on", "wearing", "in", "has"].includes(item.relation)
       );
       relationList.replaceChildren(...shown.map((item) => {
         const row = document.createElement("li");
@@ -656,11 +736,11 @@ PAGE = """<!DOCTYPE html>
       const blob = await response.blob();
       await recognizeFile(new File([blob], "example.png", { type: "image/png" }), []);
     });
-    document.getElementById("open-demo").addEventListener("click", async () => {
+    async function showDemo(imagePath, resultPath) {
       summary.textContent = "识别中…";
       const [imageResponse, resultResponse] = await Promise.all([
-        fetch("/open_demo.png"),
-        fetch("/open_demo")
+        fetch(imagePath),
+        fetch(resultPath)
       ]);
       const blob = await imageResponse.blob();
       const result = await resultResponse.json();
@@ -669,6 +749,15 @@ PAGE = """<!DOCTYPE html>
       await image.decode();
       drawResult(image, result);
       URL.revokeObjectURL(image.src);
+    }
+    document.getElementById("open-demo").addEventListener("click", () => {
+      showDemo("/open_demo.png", "/open_demo");
+    });
+    document.getElementById("support-demo").addEventListener("click", () => {
+      showDemo("/support_demo.png", "/support_demo");
+    });
+    document.getElementById("wearing-demo").addEventListener("click", () => {
+      showDemo("/wearing_demo.png", "/wearing_demo");
     });
   </script>
 </body>
@@ -707,6 +796,20 @@ def make_handler(app: InferenceApp):
                 return
             if parsed.path == "/open_demo":
                 self._send(200, app.open_demo())
+                return
+            if parsed.path == "/support_demo.png":
+                image, _detections = _support_demo_scene()
+                self._send_bytes(200, png_bytes(image), "image/png")
+                return
+            if parsed.path == "/support_demo":
+                self._send(200, app.support_demo())
+                return
+            if parsed.path == "/wearing_demo.png":
+                image, _detections = _wearing_demo_scene()
+                self._send_bytes(200, png_bytes(image), "image/png")
+                return
+            if parsed.path == "/wearing_demo":
+                self._send(200, app.wearing_demo())
                 return
             if parsed.path == "/predict":
                 preset = parse_qs(parsed.query).get("preset", ["clean"])[0]

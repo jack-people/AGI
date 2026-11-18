@@ -33,6 +33,10 @@ RELATION_VOCAB = [
     "same_shape",
     "occludes",
     "near_to",
+    "on",
+    "wearing",
+    "in",
+    "has",
 ]
 
 

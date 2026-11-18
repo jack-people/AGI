@@ -32,6 +32,7 @@ from New_Model.prototype.modules.vision_v3 import (
 from New_Model.prototype.protocol import QueryConstraint, VerificationStatus
 from New_Model.prototype.evaluate_checkpoint import CKPT_PATH
 from New_Model.prototype.scene_graph_eval import (
+    canonical_semantic,
     canonical_spatial,
     cases_from_image,
     evaluate_cases,
@@ -338,6 +339,99 @@ class TestNextGenModelArchitecture(unittest.TestCase):
         refiner = Sam2MaskRefiner()
         self.assertEqual(refiner.refine(np.zeros((8, 8, 3)), []), [])
         self.assertIsNone(refiner._model)
+
+    def test_semantic_relations_from_boxes_keep_directional_query(self) -> None:
+        """on、wearing、in、has 由框和名字写出；左右关系仍然成立。"""
+        self.assertEqual(canonical_semantic("sitting on"), "on")
+        self.assertEqual(canonical_semantic("wearing a"), "wearing")
+        self.assertIsNone(canonical_semantic("on top of"))
+        blank = np.zeros((8, 8, 3), dtype=np.float64)
+        module = VisionModuleV3(score_threshold=0.05)
+
+        def graph_for(detections):
+            return module.encode_to_scene_graph(
+                {"image": blank, "detections": detections, "queries": []}
+            )
+
+        cup_table = graph_for(
+            [
+                Detection("cup", 1.0, 0.30, 0.35, 0.48, 0.55, attributes={"vg_name": "cup"}),
+                Detection("table", 1.0, 0.42, 0.20, 0.80, 0.80, attributes={"vg_name": "table"}),
+            ]
+        )
+        self.assertTrue(cup_table.find_edges(relation_type="on"))
+        self.assertFalse(cup_table.find_edges(relation_type="in"))
+        cup_on = evaluate_cases(
+            [
+                {
+                    "image_id": 1,
+                    "relation": "on",
+                    "predicate_subject": "cup",
+                    "predicate_object": "table",
+                    "subject_id": 1,
+                    "target_id": 2,
+                    "subject_label": "cup",
+                    "target_label": "table",
+                    "detections": [
+                        Detection("cup", 1.0, 0.30, 0.35, 0.48, 0.55, attributes={"vg_object_id": 1, "vg_name": "cup"}),
+                        Detection("table", 1.0, 0.42, 0.20, 0.80, 0.80, attributes={"vg_object_id": 2, "vg_name": "table"}),
+                    ],
+                }
+            ]
+        )
+        self.assertEqual(cup_on["reasoning_accepted"], 1)
+
+        person = graph_for(
+            [
+                Detection("man", 1.0, 0.20, 0.30, 0.90, 0.60, attributes={"vg_name": "man"}),
+                Detection("hat", 1.0, 0.18, 0.36, 0.32, 0.54, attributes={"vg_name": "hat"}),
+            ]
+        )
+        wearing = person.find_edges(relation_type="wearing")
+        self.assertEqual(len(wearing), 1)
+        self.assertEqual(person.get_node(wearing[0].source_id).attributes["vg_name"], "man")
+        far_hat = graph_for(
+            [
+                Detection("man", 1.0, 0.20, 0.30, 0.90, 0.60, attributes={"vg_name": "man"}),
+                Detection("hat", 1.0, 0.02, 0.80, 0.10, 0.95, attributes={"vg_name": "hat"}),
+            ]
+        )
+        self.assertFalse(far_hat.find_edges(relation_type="wearing"))
+
+        vehicle = graph_for(
+            [
+                Detection("car", 1.0, 0.40, 0.10, 0.80, 0.70, attributes={"vg_name": "car"}),
+                Detection("wheel", 1.0, 0.62, 0.48, 0.78, 0.62, attributes={"vg_name": "wheel"}),
+            ]
+        )
+        self.assertTrue(vehicle.find_edges(relation_type="has"))
+        self.assertTrue(vehicle.find_edges(relation_type="in"))
+        beside = graph_for(
+            [
+                Detection("car", 1.0, 0.40, 0.10, 0.80, 0.70, attributes={"vg_name": "car"}),
+                Detection("wheel", 1.0, 0.62, 0.78, 0.78, 0.95, attributes={"vg_name": "wheel"}),
+            ]
+        )
+        self.assertFalse(beside.find_edges(relation_type="has"))
+
+        left_cases, skipped = cases_from_image(
+            {
+                "image_id": 9,
+                "relationships": [
+                    {
+                        "predicate": "to left of",
+                        "subject": {"name": "cup", "object_id": 1, "x": 10, "y": 20, "w": 30, "h": 40},
+                        "object": {"name": "book", "object_id": 2, "x": 120, "y": 20, "w": 40, "h": 40},
+                    }
+                ],
+            },
+            200,
+            100,
+        )
+        self.assertEqual(skipped, 0)
+        left = evaluate_cases(left_cases)
+        self.assertEqual(left["reasoning_accepted"], 1)
+        self.assertEqual(left["geometry_agreed"], 1)
 
     def test_visual_genome_directional_relations_use_open_vocab_reasoner(self) -> None:
         """真实场景图里的方向关系走开放词汇接口；语义谓词不计入。"""

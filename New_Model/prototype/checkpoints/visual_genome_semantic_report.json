@@ -1,0 +1,147 @@
+{
+  "source": "Visual Genome relationships (jn12/VisualGenome mirror of the 1.4 release)",
+  "license": "CC-BY-4.0",
+  "citation": "Krishna et al., Visual Genome: Connecting Language and Vision Using Crowdsourced Dense Image Annotations, IJCV 2017.",
+  "path": "VisionModuleV3 boxes -> on/wearing/in/has edges -> parallel branches -> RCVS",
+  "relations": [
+    "on",
+    "wearing",
+    "in",
+    "has"
+  ],
+  "perturbation_radius": 0.02,
+  "per_relation_cap": 200,
+  "images_seen": 274,
+  "images_used": 105,
+  "relations_seen_before_cap": 3669,
+  "other_relations_skipped_while_scanning": 2478,
+  "collected": {
+    "on": 200,
+    "wearing": 200,
+    "in": 200,
+    "has": 200
+  },
+  "spatial_relations": 800,
+  "geometry_agreed": 458,
+  "reasoning_accepted": 458,
+  "geometry_agreement": 57.25,
+  "reasoning_accuracy": 57.25,
+  "accepted_without_geometry": 0,
+  "misses": {
+    "rule_not_met": 316,
+    "reversed_direction": 26
+  },
+  "by_relation": {
+    "on": {
+      "count": 200,
+      "geometry_agreed": 17,
+      "reasoning_accepted": 17,
+      "geometry_agreement": 8.5,
+      "reasoning_accuracy": 8.5
+    },
+    "wearing": {
+      "count": 200,
+      "geometry_agreed": 167,
+      "reasoning_accepted": 167,
+      "geometry_agreement": 83.5,
+      "reasoning_accuracy": 83.5
+    },
+    "in": {
+      "count": 200,
+      "geometry_agreed": 125,
+      "reasoning_accepted": 125,
+      "geometry_agreement": 62.5,
+      "reasoning_accuracy": 62.5
+    },
+    "has": {
+      "count": 200,
+      "geometry_agreed": 149,
+      "reasoning_accepted": 149,
+      "geometry_agreement": 74.5,
+      "reasoning_accuracy": 74.5
+    }
+  },
+  "geometry_disagreements": [
+    {
+      "image_id": 1,
+      "relation": "on",
+      "subject": "shade",
+      "object": "sidewalk",
+      "status": "UNKNOWN",
+      "strategy": "strict_high_margin",
+      "center_gap": null,
+      "miss": "rule_not_met"
+    },
+    {
+      "image_id": 1,
+      "relation": "on",
+      "subject": "sign",
+      "object": "building",
+      "status": "UNKNOWN",
+      "strategy": "strict_high_margin",
+      "center_gap": null,
+      "miss": "rule_not_met"
+    },
+    {
+      "image_id": 1,
+      "relation": "on",
+      "subject": "tree trunk",
+      "object": "sidewalk",
+      "status": "UNKNOWN",
+      "strategy": "strict_high_margin",
+      "center_gap": null,
+      "miss": "rule_not_met"
+    },
+    {
+      "image_id": 1,
+      "relation": "on",
+      "subject": "parking meter",
+      "object": "sidewalk",
+      "status": "UNKNOWN",
+      "strategy": "strict_high_margin",
+      "center_gap": null,
+      "miss": "rule_not_met"
+    },
+    {
+      "image_id": 1,
+      "relation": "on",
+      "subject": "bike",
+      "object": "sidewalk",
+      "status": "UNKNOWN",
+      "strategy": "strict_high_margin",
+      "center_gap": null,
+      "miss": "rule_not_met"
+    },
+    {
+      "image_id": 1,
+      "relation": "on",
+      "subject": "bike",
+      "object": "sidewalk",
+      "status": "UNKNOWN",
+      "strategy": "strict_high_margin",
+      "center_gap": null,
+      "miss": "rule_not_met"
+    },
+    {
+      "image_id": 1,
+      "relation": "on",
+      "subject": "van",
+      "object": "street",
+      "status": "UNKNOWN",
+      "strategy": "strict_high_margin",
+      "center_gap": null,
+      "miss": "rule_not_met"
+    },
+    {
+      "image_id": 1,
+      "relation": "on",
+      "subject": "car",
+      "object": "street",
+      "status": "UNKNOWN",
+      "strategy": "strict_high_margin",
+      "center_gap": null,
+      "miss": "rule_not_met"
+    }
+  ],
+  "agreed_but_rejected": []
+}

@@ -32,6 +32,11 @@ CACHE_DIR = Path(__file__).resolve().parent / "data" / "visual_genome"
 REPORT_PATH = (
     Path(__file__).resolve().parent / "checkpoints" / "visual_genome_relation_report.json"
 )
+SEMANTIC_REPORT_PATH = (
+    Path(__file__).resolve().parent
+    / "checkpoints"
+    / "visual_genome_semantic_report.json"
+)
 RELATION_URL = (
     "https://huggingface.co/datasets/jn12/VisualGenome/resolve/main/relationships.json.zip"
 )
@@ -79,13 +84,40 @@ SPATIAL_PREDICATES = {
 }
 
 
-def canonical_spatial(predicate: str) -> Optional[str]:
-    """把 Visual Genome 的方向谓词收成模型里的四种关系。其他谓词返回空。"""
+SEMANTIC_PREDICATES = {
+    "on": "on",
+    "sitting on": "on",
+    "standing on": "on",
+    "lying on": "on",
+    "parked on": "on",
+    "resting on": "on",
+    "wearing": "wearing",
+    "wears": "wearing",
+    "in": "in",
+    "inside": "in",
+    "inside of": "in",
+    "has": "has",
+    "have": "has",
+}
+SEMANTIC_RELATIONS = ("on", "wearing", "in", "has")
+
+
+def _normalize_predicate(predicate: str) -> str:
     text = " ".join(str(predicate).lower().replace("_", " ").split())
     for tail in (" a", " an", " the"):
         if text.endswith(tail):
             text = text[: -len(tail)]
-    return SPATIAL_PREDICATES.get(text)
+    return text
+
+
+def canonical_spatial(predicate: str) -> Optional[str]:
+    """把 Visual Genome 的方向谓词收成模型里的四种关系。其他谓词返回空。"""
+    return SPATIAL_PREDICATES.get(_normalize_predicate(predicate))
+
+
+def canonical_semantic(predicate: str) -> Optional[str]:
+    """把 on、wearing、in、has 收成语义关系。on top of 仍留给方向关系 above。"""
+    return SEMANTIC_PREDICATES.get(_normalize_predicate(predicate))
 
 
 def _object_name(node: Dict[str, Any]) -> str:
@@ -117,14 +149,17 @@ def _box(node: Dict[str, Any], width: int, height: int) -> Optional[Tuple[float,
 
 
 def cases_from_image(
-    record: Dict[str, Any], width: int, height: int
+    record: Dict[str, Any],
+    width: int,
+    height: int,
+    classify=canonical_spatial,
 ) -> Tuple[List[Dict[str, Any]], int]:
-    """从一个图像的关系列表抽出可检查的方向关系。返回 (样本, 跳过的非方向关系数)。"""
+    """从一个图像的关系列表抽出可检查的关系。返回 (样本, 跳过的其他关系数)。"""
     skipped = 0
     objects: Dict[int, Dict[str, Any]] = {}
     pending: List[Tuple[str, int, int, str, str]] = []
     for relation in record.get("relationships") or []:
-        kind = canonical_spatial(str(relation.get("predicate", "")))
+        kind = classify(str(relation.get("predicate", "")))
         subject = relation.get("subject") or {}
         target = relation.get("object") or {}
         if kind is None:
@@ -171,7 +206,7 @@ def cases_from_image(
             item["box"][1],
             item["box"][2],
             item["box"][3],
-            attributes={"vg_object_id": object_id},
+            attributes={"vg_object_id": object_id, "vg_name": item["name"]},
         )
         for object_id, item in objects.items()
     ]
@@ -266,18 +301,43 @@ def _cached(cache_dir: Path, name: str, url: str) -> Path:
     return path
 
 
+def collect_semantic_cases(
+    relations_path: Path,
+    sizes: Dict[int, Tuple[int, int]],
+    per_relation: int = 200,
+) -> Dict[str, Any]:
+    """扫一遍关系文件，on、wearing、in、has 每种最多保留 per_relation 条。"""
+    return _collect_cases(
+        relations_path,
+        sizes,
+        {name: [] for name in SEMANTIC_RELATIONS},
+        canonical_semantic,
+        per_relation,
+    )
+
+
 def collect_spatial_cases(
     relations_path: Path,
     sizes: Dict[int, Tuple[int, int]],
     per_relation: int = 200,
 ) -> Dict[str, Any]:
     """扫一遍关系文件，每种方向关系最多保留 per_relation 条。"""
-    kept: Dict[str, List[Dict[str, Any]]] = {
-        "left_of": [],
-        "right_of": [],
-        "above": [],
-        "below": [],
-    }
+    return _collect_cases(
+        relations_path,
+        sizes,
+        {"left_of": [], "right_of": [], "above": [], "below": []},
+        canonical_spatial,
+        per_relation,
+    )
+
+
+def _collect_cases(
+    relations_path: Path,
+    sizes: Dict[int, Tuple[int, int]],
+    kept: Dict[str, List[Dict[str, Any]]],
+    classify,
+    per_relation: int,
+) -> Dict[str, Any]:
     images_used = set()
     images_seen = 0
     spatial_seen = 0
@@ -289,7 +349,7 @@ def collect_spatial_cases(
             size = sizes.get(int(record.get("image_id", -1)))
             if size is None:
                 continue
-            cases, skipped = cases_from_image(record, size[0], size[1])
+            cases, skipped = cases_from_image(record, size[0], size[1], classify)
             nonspatial += skipped
             if not cases:
                 continue
@@ -447,13 +507,21 @@ def _score_case(
     miss = ""
     geometry_agreed = False
     if subject is not None and target is not None:
-        center_gap = round(_signed_gap(subject, target, case["relation"]), 4)
+        if case["relation"] not in SEMANTIC_RELATIONS:
+            center_gap = round(_signed_gap(subject, target, case["relation"]), 4)
         geometry_agreed = any(
             edge.relation_type == case["relation"] and edge.target_id == target.entity_id
             for edge in graph.find_edges(source_id=subject.entity_id)
         )
         if not geometry_agreed:
-            if center_gap < 0:
+            if case["relation"] in SEMANTIC_RELATIONS:
+                reversed_edge = any(
+                    edge.relation_type == case["relation"]
+                    and edge.target_id == subject.entity_id
+                    for edge in graph.find_edges(source_id=target.entity_id)
+                )
+                miss = "reversed_direction" if reversed_edge else "rule_not_met"
+            elif center_gap < 0:
                 miss = "opposite_direction"
             elif center_gap < 0.04:
                 miss = "center_gap_below_0.04"
@@ -499,6 +567,38 @@ def _node_for(graph: Any, object_id: int) -> Any:
     return None
 
 
+def run_semantic_check(
+    cache_dir: Path = CACHE_DIR,
+    per_relation: int = 200,
+    report_path: Path = SEMANTIC_REPORT_PATH,
+) -> Dict[str, Any]:
+    """检查 on、wearing、in、has。方向关系的报告文件保持不动。"""
+    relations_path, image_path = ensure_annotations(cache_dir)
+    sizes = load_image_sizes(image_path)
+    collected = collect_semantic_cases(relations_path, sizes, per_relation=per_relation)
+    measured = evaluate_cases(collected["cases"])
+    report = {
+        "source": "Visual Genome relationships (jn12/VisualGenome mirror of the 1.4 release)",
+        "license": "CC-BY-4.0",
+        "citation": "Krishna et al., Visual Genome: Connecting Language and Vision Using Crowdsourced Dense Image Annotations, IJCV 2017.",
+        "path": "VisionModuleV3 boxes -> on/wearing/in/has edges -> parallel branches -> RCVS",
+        "relations": list(SEMANTIC_RELATIONS),
+        "perturbation_radius": 0.02,
+        "per_relation_cap": per_relation,
+        "images_seen": collected["images_seen"],
+        "images_used": collected["images_used"],
+        "relations_seen_before_cap": collected["spatial_seen"],
+        "other_relations_skipped_while_scanning": collected["nonspatial_skipped"],
+        "collected": collected["collected"],
+        **measured,
+    }
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report_path.write_text(
+        json.dumps(report, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+    )
+    return report
+
+
 def run_visual_genome_check(
     cache_dir: Path = CACHE_DIR,
     per_relation: int = 200,
@@ -533,15 +633,25 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="用 Visual Genome 检查开放词汇后的关系推理")
     parser.add_argument("--cache", default=str(CACHE_DIR))
     parser.add_argument("--per-relation", type=int, default=200)
-    parser.add_argument("--report", default=str(REPORT_PATH))
+    parser.add_argument("--report", default="")
+    parser.add_argument(
+        "--semantic",
+        action="store_true",
+        help="检查 on、wearing、in、has，并另写一份报告",
+    )
     args = parser.parse_args()
-    report = run_visual_genome_check(
+    report_path = Path(args.report) if args.report else (
+        SEMANTIC_REPORT_PATH if args.semantic else REPORT_PATH
+    )
+    runner = run_semantic_check if args.semantic else run_visual_genome_check
+    report = runner(
         cache_dir=Path(args.cache),
         per_relation=args.per_relation,
-        report_path=Path(args.report),
+        report_path=report_path,
     )
+    title = "语义关系检查" if args.semantic else "方向关系检查"
     print("=" * 78)
-    print("  Visual Genome 方向关系检查")
+    print(f"  Visual Genome {title}")
     print("=" * 78)
     print(
         f"  样本 {report['spatial_relations']} 条，来自 {report['images_used']} 张图。"
@@ -560,7 +670,7 @@ def main() -> None:
             f"几何 {bucket['geometry_agreement']:>6.2f}%  "
             f"推理 {bucket['reasoning_accuracy']:>6.2f}%"
         )
-    print(f"  报告: {args.report}")
+    print(f"  报告: {report_path}")
     print("=" * 78)
 
 

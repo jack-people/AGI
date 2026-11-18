@@ -85,7 +85,18 @@ New_Model/
 
 `arm.py` 里有平面两连杆正运动学，机械臂仿真先不继续。`continual.py` 在推理时把「严格分支没答对、其他分支改对」的查询连同场景图写入回放池。`python3 -m New_Model.prototype.trainer --incremental` 读取这些记录，和 120 题里的清晰样本混在一起再跑一轮 GRPO。清晰、遮挡、临界和总准确率都没有下降时，新权重写到 `checkpoints/pmv_incremental_weights.npz`，原来的 `pmv_trained_weights.npz` 保持不变。
 
-`scene_graph_eval.py` 用 Visual Genome 的真实关系标注检查开放词汇之后的关系推理。标注框走 `VisionModuleV3` 的同一条接口，再交给原来的并行分支和 RCVS。计入分数的是方向关系：left of、right of、above、on top of、under。wearing、on、has 这类语义关系不在当前词表里，扫描时跳过。每种方向关系取 200 条，共 800 条：几何关系和推理结论一致的是 76.00%。方向对得上、中心距达到画面 4% 的样本全部被接受。没对上的 192 条里，118 条是标注方向和框中心相反，74 条是两个中心靠得太近。报告在 `checkpoints/visual_genome_relation_report.json`。原始标注缓存在 `data/visual_genome/`，不进仓库。
+`scene_graph_eval.py` 用 Visual Genome 的真实关系标注检查开放词汇之后的关系推理。标注框走 `VisionModuleV3` 的同一条接口，再交给原来的并行分支和 RCVS。
+
+方向关系是 left of、right of、above、on top of、under。每种 200 条，共 800 条，接受率 76.00%。方向和框中心一致、并且拉开到画面 4% 的样本全部接受。报告在 `checkpoints/visual_genome_relation_report.json`。
+
+另外四种关系由框和名字写成边，色块视觉 V1、V2 不写这些边：
+
+- `on`：上面物体的底边贴住下面物体的上半部，并且水平重叠。`on top of` 仍然算 `above`。
+- `in`：一个框的大部分落在另一个框里面。
+- `wearing`：人的名字配上衣服或配件的名字，并且衣服框和人的框重叠。
+- `has`：整体框包住部件框。只是挨得近、没有包含时不写。
+
+`python3 -m New_Model.prototype.scene_graph_eval --semantic` 对这四种各取 200 条。接受率是 on 8.50%、wearing 83.50%、in 62.50%、has 74.50%，合计 57.25%。没写上边的 342 条里，316 条是框不满足规则，26 条是标注的主客体方向和框的包含方向相反。`on` 低，是因为标注里的 on 常常只是「在某个景物上」，例如 shade on sidewalk，底边并不贴住对方的上半部。报告在 `checkpoints/visual_genome_semantic_report.json`。原始标注缓存在 `data/visual_genome/`，不进仓库。
 
 ## 运行
 
@@ -111,6 +122,7 @@ python3 -m New_Model.prototype.serve --host 0.0.0.0 --port 8765
 python3 -m New_Model.prototype.trainer
 python3 -m New_Model.prototype.trainer --incremental
 python3 -m New_Model.prototype.scene_graph_eval
+python3 -m New_Model.prototype.scene_graph_eval --semantic
 python3 -m New_Model.prototype.evaluate_checkpoint
 python3 -m New_Model.prototype.demo
 python3 -m New_Model.prototype.benchmark

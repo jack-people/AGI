@@ -14,6 +14,7 @@ from typing import Any, Dict, List, Optional, Protocol, Sequence
 import numpy as np
 
 from ..protocol import BoundingBox, EntityNode, RelationEdge, StructuredSceneGraph
+from .relations import propose_semantic_edges
 from .vision import SceneObjectSpec, VisionModuleV1, VisualSceneBuilder
 
 
@@ -422,7 +423,11 @@ class VisionModuleV3(VisionModuleV1):
                 )
             )
 
-        edges = self._extract_relations(nodes) + self._occlusion_edges(nodes, masks)
+        edges = (
+            self._extract_relations(nodes)
+            + self._occlusion_edges(nodes, masks)
+            + propose_semantic_edges(nodes)
+        )
         return StructuredSceneGraph(
             nodes=nodes,
             edges=edges,
